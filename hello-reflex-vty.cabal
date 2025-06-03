@@ -13,4 +13,31 @@ executable hello-reflex-vty
     , reflex-vty
     , text
     , vty
+    , ref-tf
+  default-language: Haskell2010
+
+executable drag-hello-reflex-vty
+  hs-source-dirs:   app
+  main-is:          dragHelloWorld.hs
+  ghc-options:      -threaded -Wall
+  build-depends:
+      base
+    , reflex
+    , reflex-vty
+    , text
+    , vty
+    , ref-tf
+  default-language: Haskell2010
+
+executable drag2-hello-reflex-vty
+  hs-source-dirs:   app
+  main-is:          dragRectangle.hs
+  ghc-options:      -threaded -Wall
+  build-depends:
+      base
+    , reflex
+    , reflex-vty
+    , text
+    , vty
+    , ref-tf
   default-language: Haskell2010

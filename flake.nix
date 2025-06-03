@@ -28,6 +28,14 @@
         type = "app";
         program = "${self.packages.${system}.default}/bin/hello-reflex-vty";
       };
+      apps.dragHelloWorld = {
+        type = "app";
+        program = "${self.packages.${system}.default}/bin/drag-hello-reflex-vty";
+      };
+      apps.dragRectangle = {
+        type = "app";
+        program = "${self.packages.${system}.default}/bin/drag2-hello-reflex-vty";
+      };
     };
   };
 }
