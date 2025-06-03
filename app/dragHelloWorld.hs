@@ -1,5 +1,4 @@
 {-# LANGUAGE FlexibleContexts  #-}
-{-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE OverloadedStrings #-}
 
 module Main where
@@ -12,13 +11,12 @@ import           Reflex.Vty
 main :: IO ()
 main = mainWidget $ initManager_ $ do
   inp <- input
-  simpleHelloWorld
+  dragHelloWorld
   let quitEvent = fforMaybe inp $ \case
         V.EvKey V.KEsc [] -> Just ()
         V.EvKey (V.KChar 'c') [V.MCtrl] -> Just ()
         _ -> Nothing
   return quitEvent
 
-simpleHelloWorld :: (Reflex t, HasImageWriter t m) => m ()
-simpleHelloWorld = tellImages $ pure [V.string V.defAttr "¡Hello, Reflex-VTY!"]
-
+dragHelloWorld :: (Reflex t, HasImageWriter t m) => m ()
+dragHelloWorld = tellImages $ pure [V.string V.defAttr "¡Drag Hello World!"]
