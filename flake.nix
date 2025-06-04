@@ -23,18 +23,24 @@
             };
           };
       };
-      packages.default = self'.packages.hello-reflex-vty;
-      apps.default = {
-        type = "app";
-        program = "${self.packages.${system}.default}/bin/hello-reflex-vty";
+      packages = {
+        default = self'.packages.hello-reflex-vty;
+        dragHelloWorld = self'.packages.dragHelloWorld;
+        dragRectangle = self'.packages.dragRectangle;
       };
-      apps.dragHelloWorld = {
-        type = "app";
-        program = "${self.packages.${system}.default}/bin/drag-hello-reflex-vty";
-      };
-      apps.dragRectangle = {
-        type = "app";
-        program = "${self.packages.${system}.default}/bin/drag2-hello-reflex-vty";
+      apps = {
+        default = {
+          type = "app";
+          program = "${self.packages.${system}.default}/bin/hello-reflex-vty";
+        };
+        dragHelloWorld = {
+          type = "app";
+          program = "${self.packages.${system}.default}/bin/drag-hello-reflex-vty";
+        };
+        dragRectangle = {
+          type = "app";
+          program = "${self.packages.${system}.default}/bin/drag2-hello-reflex-vty";
+        };
       };
     };
   };
