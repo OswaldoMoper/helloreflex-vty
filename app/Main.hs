@@ -19,6 +19,5 @@ main = mainWidget $ initManager_ $ do
         _ -> Nothing
   return quitEvent
 
-simpleHelloWorld :: (Reflex t, HasImageWriter t m) => m ()
-simpleHelloWorld = tellImages $ pure [V.string V.defAttr "¡Hello, Reflex-VTY!"]
-
+simpleHelloWorld :: (HasDisplayRegion t m, HasImageWriter t m, HasTheme t m) => m ()
+simpleHelloWorld = text ( pure ( pack $ concat (replicate 13 "\n") ++ replicate 43 ' ' ++ "¡Hello, Reflex-VTY!" ) )
