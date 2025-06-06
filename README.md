@@ -34,3 +34,8 @@ If you have trouble, refer to the [Reflex-VTY GitHub Repo](https://github.com/re
     3. Run the **Reflex-VTY** app with: `nix run`
 
 To close you can press `Esc` or `Ctrl` keys.
+
+## Credits and Licenses
+
+* This project includes code derived from [Reflex-FRP/Reflex-VTY](https://github.com/reflex-frp/reflex-vty), licensed under the [BSD-3-Clause License](https://github.com/reflex-frp/reflex-vty/blob/develop/LICENSE)  
+* Additional modifications and original code in this repository are licensed under the [BSD-3-Clause License](./LICENSE).
