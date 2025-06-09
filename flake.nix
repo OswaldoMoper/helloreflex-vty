@@ -39,7 +39,19 @@
         };
         dragRectangle = {
           type = "app";
-          program = "${self.packages.${system}.default}/bin/drag2-hello-reflex-vty";
+          program = "${self.packages.${system}.default}/bin/dragRectangle";
+        };
+        dragEntity = {
+          type = "app";
+          program = "${self.packages.${system}.default}/bin/dragEntity";
+        };
+        resizeEntity = {
+          type = "app";
+          program = "${self.packages.${system}.default}/bin/resizeEntity";
+        };
+        dragNResize = {
+          type = "app";
+          program = "${self.packages.${system}.default}/bin/dragNResize";
         };
       };
     };

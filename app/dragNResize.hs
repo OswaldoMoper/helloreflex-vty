@@ -12,14 +12,14 @@ import Control.Monad.Fix (MonadFix)
 main :: IO ()
 main = mainWidget $ initManager_ $ do
   inp <- input
-  dragRectangle inp
+  dragNResize inp
   let quitEvent = fforMaybe inp $ \case
         V.EvKey V.KEsc [] -> Just ()
         V.EvKey (V.KChar 'c') [V.MCtrl] -> Just ()
         _ -> Nothing
   return quitEvent
 
-dragRectangle ::
+dragNResize ::
   ( HasDisplayRegion t m
   , HasImageWriter t m
   , HasTheme t m
@@ -28,7 +28,7 @@ dragRectangle ::
   , TriggerEvent t m
   , MonadFix m
   ) => Event t V.Event -> m ()
-dragRectangle inp = do
+dragNResize inp = do
   let initialPosition = (0, 0)
       initialWidth = 16
       initialHeight = 5
