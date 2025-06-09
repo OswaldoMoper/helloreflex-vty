@@ -41,3 +41,42 @@ executable drag2-hello-reflex-vty
     , vty
     , ref-tf
   default-language: Haskell2010
+
+executable drag3-hello-reflex-vty
+  hs-source-dirs:   app
+  main-is:          dragEntity.hs
+  ghc-options:      -threaded -Wall
+  build-depends:
+      base
+    , reflex
+    , reflex-vty
+    , text
+    , vty
+    , ref-tf
+  default-language: Haskell2010
+
+executable resize-hello-reflex-vty
+  hs-source-dirs:   app
+  main-is:          resizeEntity.hs
+  ghc-options:      -threaded -Wall
+  build-depends:
+      base
+    , reflex
+    , reflex-vty
+    , text
+    , vty
+    , ref-tf
+  default-language: Haskell2010
+
+executable resize2-hello-reflex-vty
+  hs-source-dirs:   app
+  main-is:          dragNResize.hs
+  ghc-options:      -threaded -Wall
+  build-depends:
+      base
+    , reflex
+    , reflex-vty
+    , text
+    , vty
+    , ref-tf
+  default-language: Haskell2010
