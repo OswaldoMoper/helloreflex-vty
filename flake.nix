@@ -31,11 +31,11 @@
       apps = {
         default = {
           type = "app";
-          program = "${self.packages.${system}.default}/bin/hello-reflex-vty";
+          program = "${self.packages.${system}.default}/bin/helloWorld";
         };
         dragHelloWorld = {
           type = "app";
-          program = "${self.packages.${system}.default}/bin/drag-hello-reflex-vty";
+          program = "${self.packages.${system}.default}/bin/dragHelloWorld";
         };
         dragRectangle = {
           type = "app";
