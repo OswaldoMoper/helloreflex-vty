@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecursiveDo       #-}
 
 module Main where
 
@@ -8,6 +9,7 @@ import           Data.Text    (pack)
 import qualified Graphics.Vty as V
 import           Reflex
 import           Reflex.Vty
+import Control.Monad.Fix (MonadFix)
 
 main :: IO ()
 main = mainWidget $ initManager_ $ do
@@ -19,32 +21,46 @@ main = mainWidget $ initManager_ $ do
         _ -> Nothing
   return quitEvent
 
-dragHelloWorld :: (HasDisplayRegion t m, HasImageWriter t m, HasTheme t m, PerformEvent t m, MonadHold t m, TriggerEvent t m) => Event t V.Event -> m ()
+dragHelloWorld :: (HasDisplayRegion t m, HasImageWriter t m, HasTheme t m, PerformEvent t m, MonadHold t m, TriggerEvent t m, MonadFix m) => Event t V.Event -> m ()
 dragHelloWorld inp = do
   let textLabel = "¡Hello, Reflex-VTY!"
-      initialPosition = (0, 0)
+      -- initialX = 0
+      -- initialY = 0
+      -- initialPosition = (initialX, initialY)
       textWidth = length textLabel
 
-      posEvent = fmapMaybe (\case
-        V.EvMouseDown x y _ _ -> Just (x, y)
-        _                     -> Nothing) inp
-
-      releaseEvent = fmapMaybe (\case
+      mouseUpEvent = fmapMaybe (\case
         V.EvMouseUp{} -> Just ()
-        _             -> Nothing) inp
+        _ -> Nothing) inp
+  rec
+    currentPosDyn <- foldDyn (\new _ -> new) (0, 0) $
+      attachPromptlyDynWith (\_basePos newPos -> newPos) basePosDyn posEvent
+    
+    basePosDyn <- foldDyn (\new _ -> new) (0, 0) $
+      tag (current currentPosDyn) mouseUpEvent
 
-  lastValidPos <- holdDyn initialPosition posEvent
-  let lastValidPosEvent = updated lastValidPos
+    let mouseStartDragging =
+            True <$ attachPromptlyDynWithMaybe
+              (\(x0, y0) ev -> case ev of
+                  V.EvMouseDown x y _ _ | isInside x y x0 y0 -> Just (x, y)
+                  _ -> Nothing)
+              basePosDyn
+              inp
+          where
+            isInside x y x0 y0 =
+              y > y0 - 1 && y < y0 + 2 && x > x0 && x < x0 + textWidth
+        mouseStopDragging = fmap (const False) mouseUpEvent
 
-      startDragEvent = fmapMaybe (\(clickPos, lastPos) ->
-        if isClickOn clickPos lastPos textWidth
-        then Just clickPos
-        else Nothing) (attach (current lastValidPos) posEvent)
-  dragging <- holdDyn False $ leftmost [True <$ startDragEvent, False <$ releaseEvent]
-  let filteredMovement = gate (current dragging) posEvent
-  finalPos <- holdDyn initialPosition filteredMovement
-  text $ current $ fmap (\(x, y) -> pack $ concat (replicate y "\n") ++ replicate x ' ' ++ textLabel) finalPos
+    isDragging <- holdDyn False $ leftmost [mouseStartDragging, mouseStopDragging]
 
-isClickOn :: (Int, Int) -> (Int, Int) -> Int -> Bool
-isClickOn (clickX, clickY) (x_text, y_text) w_text =
-  clickX >= x_text && clickX < (x_text + w_text) && clickY == y_text
+    let posEvent = gate (current isDragging) $
+          fmapMaybe (\case
+            V.EvMouseDown x y _ _ -> Just (x, y)
+            _ -> Nothing) inp
+
+  tellImages $ fmap (\(x, y) -> [drawText x y textLabel]) (current currentPosDyn)
+
+drawText :: Int -> Int -> String -> V.Image
+drawText x y text =
+  let textImage = V.string V.defAttr text
+  in V.translate x y textImage
