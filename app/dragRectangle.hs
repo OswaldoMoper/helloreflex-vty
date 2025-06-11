@@ -24,17 +24,14 @@ dragRectangle :: (HasDisplayRegion t m, HasImageWriter t m, HasTheme t m, Perfor
 dragRectangle inp = do
   let rectWidth = 10
       rectHeight = 5
-
       mouseUpEvent = fmapMaybe (\case
         V.EvMouseUp{} -> Just ()
         _ -> Nothing) inp
   rec
     currentPosDyn <- foldDyn const (0, 0) $
       attachPromptlyDynWith (\_basePos newPos -> newPos) basePosDyn posEvent
-
     basePosDyn <- foldDyn const (0, 0) $
       tag (current currentPosDyn) mouseUpEvent
-
     let mouseStartDragging =
             True <$ attachPromptlyDynWithMaybe
               (\(x0, y0) ev -> case ev of
@@ -46,16 +43,12 @@ dragRectangle inp = do
             isInside x y x0 y0 =
               y > y0 && y < y0 + rectHeight && x > x0 && x < x0 + rectWidth
         mouseStopDragging = fmap (const False) mouseUpEvent
-
     isDragging <- holdDyn False $ leftmost [mouseStartDragging, mouseStopDragging]
-
     let posEvent = gate (current isDragging) $
           fmapMaybe (\case
             V.EvMouseDown x y _ _ -> Just (x, y)
             _ -> Nothing) inp
-
   tellImages $ fmap (\(x, y) -> [drawRect x y rectWidth rectHeight]) (current currentPosDyn)
-
 
 drawRect :: Int -> Int -> Int -> Int -> V.Image
 drawRect x y w h =

@@ -5,11 +5,10 @@
 
 module Main where
 
-import           Data.Text    (pack)
-import qualified Graphics.Vty as V
+import           Control.Monad.Fix (MonadFix)
+import qualified Graphics.Vty      as V
 import           Reflex
 import           Reflex.Vty
-import Control.Monad.Fix (MonadFix)
 
 main :: IO ()
 main = mainWidget $ initManager_ $ do
@@ -24,43 +23,34 @@ main = mainWidget $ initManager_ $ do
 dragHelloWorld :: (HasDisplayRegion t m, HasImageWriter t m, HasTheme t m, PerformEvent t m, MonadHold t m, TriggerEvent t m, MonadFix m) => Event t V.Event -> m ()
 dragHelloWorld inp = do
   let textLabel = "¡Hello, Reflex-VTY!"
-      -- initialX = 0
-      -- initialY = 0
-      -- initialPosition = (initialX, initialY)
       textWidth = length textLabel
-
       mouseUpEvent = fmapMaybe (\case
         V.EvMouseUp{} -> Just ()
         _ -> Nothing) inp
   rec
-    currentPosDyn <- foldDyn (\new _ -> new) (0, 0) $
+    currentPosDyn <- foldDyn const (0, 0) $
       attachPromptlyDynWith (\_basePos newPos -> newPos) basePosDyn posEvent
-    
-    basePosDyn <- foldDyn (\new _ -> new) (0, 0) $
+    basePosDyn <- foldDyn const (0, 0) $
       tag (current currentPosDyn) mouseUpEvent
-
     let mouseStartDragging =
             True <$ attachPromptlyDynWithMaybe
               (\(x0, y0) ev -> case ev of
                   V.EvMouseDown x y _ _ | isInside x y x0 y0 -> Just (x, y)
-                  _ -> Nothing)
+                  _                                          -> Nothing)
               basePosDyn
               inp
           where
             isInside x y x0 y0 =
-              y > y0 - 1 && y < y0 + 2 && x > x0 && x < x0 + textWidth
+              y > y0 - 1 && y < y0 + 1 && x > x0 && x < x0 + textWidth
         mouseStopDragging = fmap (const False) mouseUpEvent
-
     isDragging <- holdDyn False $ leftmost [mouseStartDragging, mouseStopDragging]
-
     let posEvent = gate (current isDragging) $
           fmapMaybe (\case
             V.EvMouseDown x y _ _ -> Just (x, y)
             _ -> Nothing) inp
-
   tellImages $ fmap (\(x, y) -> [drawText x y textLabel]) (current currentPosDyn)
 
 drawText :: Int -> Int -> String -> V.Image
-drawText x y text =
-  let textImage = V.string V.defAttr text
+drawText x y lText =
+  let textImage = V.string V.defAttr lText
   in V.translate x y textImage
