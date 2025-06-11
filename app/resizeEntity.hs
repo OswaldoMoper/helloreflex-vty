@@ -1,6 +1,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE LambdaCase #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecursiveDo #-}
 
 module Main where
 
@@ -20,28 +21,24 @@ main = mainWidget $ initManager_ $ do
 
 resizeRectangle :: (HasDisplayRegion t m, HasImageWriter t m, HasTheme t m, PerformEvent t m, MonadHold t m, TriggerEvent t m) 
                 => Event t V.Event -> m ()
-resizeRectangle inp = do
+resizeRectangle inp = mdo
   let initialX = 10
       initialY = 5
       initialWidth = 16
-      initialHeight = 5
 
-      mouseDownEvent = fmapMaybe (\case
-        V.EvMouseDown _ y _ _ | y == (initialY + initialHeight - 1) -> Just y
-        _ -> Nothing) inp
-        
       mouseUpEvent = fmapMaybe (\case
-          V.EvMouseUp{} -> Just ()
+        V.EvMouseUp{} -> Just ()
+        _ -> Nothing) inp
+      mouseStopDragging = fmap (const False) mouseUpEvent
+  hDyn <- holdDyn 5 $ heightChange inp
+  isDragging <- holdDyn False $ leftmost [mouseStartDragging initialX initialY hDyn initialWidth inp, mouseStopDragging]
+  let heightEventFiltered = gate (current isDragging) $
+        fmapMaybe (\case
+          V.EvMouseDown _ y _ _ -> Just y
           _ -> Nothing) inp
-
-  isDragging <- holdDyn False $ leftmost
-    [ fmap (const True) mouseDownEvent
-    , fmap (const False) mouseUpEvent
-    ]
-
-  let heightEventFiltered = gate (current isDragging) mouseDownEvent
-
-  hDyn <- holdDyn initialHeight heightEventFiltered
+      heightChange
+        = attachPromptlyDynWith
+            (\ h y -> y - initialY + h) hDyn heightEventFiltered
   tellImages $ fmap (\h -> [drawRect initialX initialY initialWidth h]) (current hDyn)
 
 
@@ -60,3 +57,19 @@ drawRect x y w h =
       rowsBefore = replicate textRowPosition emptyRow
       rowsAfter = replicate (h - 3 - textRowPosition) emptyRow
   in V.translate x y $ V.vertCat ([topBottom] ++ rowsBefore ++ [textRow] ++ rowsAfter ++ [bottomRow])
+
+mouseStartDragging initialX initialY hDyn initialWidth inp =
+  True <$ attachPromptlyDynWith (\h ev -> fmapMaybe (\case
+    V.EvMouseDown x y _ _ -> 
+      if (y == initialY + h - 1) && (x > initialX && x < initialX + initialWidth) 
+      then Just True
+      else Nothing
+    _ -> Nothing) (Just ev)) hDyn inp
+
+-- mouseStartDragging initialX initialY initialHeight initialWidth inp = 
+--   True <$ fmapMaybe (\case
+--     V.EvMouseDown x y _ _ -> 
+--       if (y == initialY + initialHeight - 1) && (x > initialX && x < initialX + initialWidth) then
+--         Just y
+--       else Nothing
+--     _ -> Nothing) inp
