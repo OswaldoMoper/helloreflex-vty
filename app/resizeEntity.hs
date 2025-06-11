@@ -21,30 +21,29 @@ main = mainWidget $ initManager_ $ do
 resizeRectangle :: (HasDisplayRegion t m, HasImageWriter t m, HasTheme t m, PerformEvent t m, MonadHold t m, TriggerEvent t m) 
                 => Event t V.Event -> m ()
 resizeRectangle inp = do
-  let initialSize = (10, 5, 16, 5)
+  let initialX = 10
+      initialY = 5
+      initialWidth = 16
+      initialHeight = 5
 
-  lastValidSize <- holdDyn initialSize $ fmapMaybe (\case
-      V.EvMouseDown mx my _ _ -> Just (mx, my, 16, 5)
-      _                       -> Nothing) inp
+      mouseDownEvent = fmapMaybe (\case
+        V.EvMouseDown _ y _ _ | y == (initialY + initialHeight - 1) -> Just y
+        _ -> Nothing) inp
+        
+      mouseUpEvent = fmapMaybe (\case
+          V.EvMouseUp{} -> Just ()
+          _ -> Nothing) inp
 
-  let startResizeEvent = fmapMaybe (\((x, y, w, h), (mx, my)) -> 
-        case () of
-          _ | my == y       -> Just (x, y - 1, w, h + 1)
-            | my == y + h   -> Just (x, y, w, h - 1)
-            | mx == x + w   -> Just (x, y, w + 1, h)
-            | mx == x       -> Just (x, y, w - 1, h)
-            | otherwise     -> Nothing) 
-        (attach (current lastValidSize) (fmapMaybe (\case
-          V.EvMouseDown mx my _ _ -> Just (mx, my)
-          _                       -> Nothing) inp))
+  isDragging <- holdDyn False $ leftmost
+    [ fmap (const True) mouseDownEvent
+    , fmap (const False) mouseUpEvent
+    ]
 
-  resizing <- holdDyn False $ leftmost [True <$ startResizeEvent, False <$ fmapMaybe (\case V.EvMouseUp{} -> Just (); _ -> Nothing) inp]
+  let heightEventFiltered = gate (current isDragging) mouseDownEvent
 
-  let filteredResize = gate (current resizing) startResizeEvent
+  hDyn <- holdDyn initialHeight heightEventFiltered
+  tellImages $ fmap (\h -> [drawRect initialX initialY initialWidth h]) (current hDyn)
 
-  finalSize <- holdDyn initialSize filteredResize
-
-  tellImages $ fmap (\(x, y, w, h) -> [drawRect x y w h]) (current finalSize)
 
 drawRect :: Int -> Int -> Int -> Int -> V.Image
 drawRect x y w h =
