@@ -1,10 +1,12 @@
 {-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecursiveDo       #-}
 
 module Main where
 
-import qualified Graphics.Vty as V
+import           Control.Monad.Fix (MonadFix)
+import qualified Graphics.Vty      as V
 import           Reflex
 import           Reflex.Vty
 
@@ -18,48 +20,48 @@ main = mainWidget $ initManager_ $ do
         _ -> Nothing
   return quitEvent
 
-dragRectangle :: (HasDisplayRegion t m, HasImageWriter t m, HasTheme t m, PerformEvent t m, MonadHold t m, TriggerEvent t m) => Event t V.Event -> m ()
+dragRectangle :: (HasDisplayRegion t m, HasImageWriter t m, HasTheme t m, PerformEvent t m, MonadHold t m, TriggerEvent t m, MonadFix m) => Event t V.Event -> m ()
 dragRectangle inp = do
-  let initialPosition = (0, 0)
-      rectWidth = 16
+  let lText = "¡Hello, Reflex-VTY!"
+      rectWidth = max 10 (length lText + 2)
       rectHeight = 5
-
-      posEvent = fmapMaybe (\case
-        V.EvMouseDown x y _ _ -> Just (x, y)
-        _                     -> Nothing) inp
-
-      releaseEvent = fmapMaybe (\case
+      mouseUpEvent = fmapMaybe (\case
         V.EvMouseUp{} -> Just ()
-        _             -> Nothing) inp
+        _ -> Nothing) inp
+  rec
+    currentPosDyn <- foldDyn const (0, 0) $
+      attachPromptlyDynWith (\_basePos newPos -> newPos) basePosDyn posEvent
+    basePosDyn <- foldDyn const (0, 0) $
+      tag (current currentPosDyn) mouseUpEvent
+    let mouseStartDragging =
+            True <$ attachPromptlyDynWithMaybe
+              (\(x0, y0) ev -> case ev of
+                  V.EvMouseDown x y _ _ | isInside x y x0 y0 -> Just (x, y)
+                  _                                          -> Nothing)
+              basePosDyn
+              inp
+          where
+            isInside x y x0 y0 =
+              y > y0 && y < y0 + rectHeight && x > x0 && x < x0 + rectWidth
+        mouseStopDragging = fmap (const False) mouseUpEvent
+    isDragging <- holdDyn False $ leftmost [mouseStartDragging, mouseStopDragging]
+    let posEvent = gate (current isDragging) $
+          fmapMaybe (\case
+            V.EvMouseDown x y _ _ -> Just (x, y)
+            _ -> Nothing) inp
+  tellImages $ fmap (\(x, y) -> [drawRect x y rectWidth rectHeight lText]) (current currentPosDyn)
 
-  lastValidPos <- holdDyn initialPosition posEvent
-  let startDragEvent = fmapMaybe (\(clickPos, lastPos) ->
-        if isClickOn clickPos lastPos rectWidth rectHeight
-        then Just clickPos
-        else Nothing) (attach (current lastValidPos) posEvent)
-
-  dragging <- holdDyn False $ leftmost [True <$ startDragEvent, False <$ releaseEvent]
-  let filteredMovement = gate (current dragging) posEvent
-  finalPos <- holdDyn initialPosition filteredMovement
-
-  tellImages $ fmap (\(x, y) -> [drawRect x y rectWidth rectHeight]) (current finalPos)
-
-drawRect :: Int -> Int -> Int -> Int -> V.Image
-drawRect x y w h =
-  let lText = "Hello World"
-      topBottom        = V.string V.defAttr ("╭" ++ replicate (w - 2) '─' ++ "╮")
+drawRect :: Int -> Int -> Int -> Int -> String-> V.Image
+drawRect x y w h lText =
+  let topBottom        = V.string V.defAttr ("╭" ++ replicate (w - 2) '─' ++ "╮")
       emptyRow         = V.string V.defAttr ("│" ++ replicate (w - 2) ' ' ++ "│")
       bottomRow        = V.string V.defAttr ("╰" ++ replicate (w - 2) '─' ++ "╯")
 
       textRowPosition  = (h - 3) `div` 2
       rowsBefore       = replicate textRowPosition emptyRow
       rowsAfter        = replicate (h - 3 - textRowPosition) emptyRow
-      
+
       textPaddingLeft  = (w - 2 - length lText) `div` 2
       textPaddingRight = (w - 2 - length lText) - textPaddingLeft
       textRow          = V.string V.defAttr ("│" ++ replicate textPaddingLeft ' ' ++ lText ++ replicate textPaddingRight ' ' ++ "│")
   in V.translate x y $ V.vertCat ([topBottom] ++ rowsBefore ++ [textRow] ++ rowsAfter ++ [bottomRow])
-
-isClickOn :: (Int, Int) -> (Int, Int) -> Int -> Int -> Bool
-isClickOn (clickX, clickY) (x_rect, y_rect) w_rect h_rect =
-  clickX >= x_rect && clickX < (x_rect + w_rect) && clickY >= y_rect && clickY < (y_rect + h_rect)
