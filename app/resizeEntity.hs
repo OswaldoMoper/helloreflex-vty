@@ -9,6 +9,11 @@ import Control.Monad.Fix (MonadFix)
 import qualified Graphics.Vty as V
 import           Reflex
 import           Reflex.Vty
+import           Data.Maybe (isJust)
+
+data ResizeEdge = TopEdge 
+                | BottomEdge 
+                deriving (Eq)
 
 main :: IO ()
 main = mainWidget $ initManager_ $ do
@@ -25,8 +30,11 @@ resizeRectangle :: (HasDisplayRegion t m, HasImageWriter t m, HasTheme t m, Perf
 resizeRectangle inp = do
   let lText = "¡Hello, Reflex-VTY!"
       initialX = 10
-      initialY = 5
       initialWidth = max 16 (length lText + 2)
+      minHeight = 3
+      mouseDownEvent = fmapMaybe (\case
+        V.EvMouseDown x y _ _ -> Just (x, y)
+        _ -> Nothing) inp
       mouseUpEvent = fmapMaybe (\case
         V.EvMouseUp{} -> Just ()
         _ -> Nothing) inp
@@ -36,26 +44,63 @@ resizeRectangle inp = do
   -- For now, we will keep the width constant
   -- and allow height to change when the user clicks and drags
   -- the vertical edges of the rectangle.
-    currentHDyn <- foldDyn const 5 $
-      attachPromptlyDynWith (\_baseHeight newHeight -> newHeight) baseHeightDyn heightEvent
-    baseHeightDyn <- foldDyn const 5 $
-      tag (current currentHDyn) mouseUpEvent
-    let mouseStartResizing =
-          True <$ attachPromptlyDynWithMaybe
-            (\h ev -> case ev of
-                V.EvMouseDown x y _ _ | isOnEdge x y h -> Just ()
-                _ -> Nothing)
-            baseHeightDyn
-            inp
-          where
-            isOnEdge x y h = y == initialY + h - 1 && x >= initialX && x < initialX + initialWidth
-        mouseStopResizing = fmap (const False) mouseUpEvent
-    isResizing <- holdDyn False $ leftmost [mouseStartResizing, mouseStopResizing]
-    let heightEvent = gate (current isResizing) $
-          fmapMaybe (\case
-            V.EvMouseDown x y _ _ -> Just (max 3 (y - initialY + 1))
-            _ -> Nothing) inp
-  tellImages $ fmap (\h -> [drawRect initialX initialY initialWidth h lText]) (current currentHDyn)
+    topDyn    <- foldDyn ($) 5 topUpdate
+    heightDyn <- foldDyn ($) 5 heightUpdate
+
+    let edgeClick = attachPromptlyDynWithMaybe
+          (\(top, h) (x, y) ->
+            if y == top
+            then Just (TopEdge, y)
+            else if y == top + h-1
+            then Just (BottomEdge, y)
+            else Nothing) (zipDyn topDyn heightDyn) mouseDownEvent
+    
+    resizingDyn <- holdDyn Nothing $
+      leftmost
+        [ Just <$> edgeClick
+        , Nothing <$ mouseUpEvent 
+        ]
+    
+    let dragging = fmap isJust resizingDyn
+        resizing = gate (current dragging) mouseDownEvent
+        heightUpdate = attachWithMaybe
+          (\res (_, y) ->
+            case res of
+              Just (TopEdge, y0) ->
+                let delta = y0 - y
+                in if delta /=0
+                   then Just $ \h ->
+                     let newHeight = h + delta
+                     in max minHeight newHeight
+                   else Nothing
+              Just (BottomEdge, y0) ->
+                let delta = y - y0
+                in if delta /= 0
+                   then Just $ \h ->
+                     let newHeight = h + delta
+                     in max minHeight newHeight
+                   else Nothing
+              _ -> Nothing)
+          (current resizingDyn) resizing
+  -- Actually the topUpdate don't work correctly, we can
+  -- resize correctly with the bottom edge  and we can
+  -- reduce the height with the top edge but when we try
+  -- to increase the height with the top edge the rectangle
+  -- changes height but the top edge don't change it position
+        topUpdate = attachWithMaybe
+          (\res (_, y) ->
+            case res of
+              Just (TopEdge, y0) ->
+                let delta = y - y0
+                in if delta >= 0
+                   then Just (+ delta)
+                   else Nothing
+              _ -> Nothing)
+          (current resizingDyn) resizing
+  let drawDyn = zipDynWith
+        (\top h -> drawRect initialX top initialWidth h lText)
+        topDyn heightDyn
+  tellImages $ fmap (:[]) (current drawDyn)
 
 drawRect :: Int -> Int -> Int -> Int -> String -> V.Image
 drawRect x y w h lText =
