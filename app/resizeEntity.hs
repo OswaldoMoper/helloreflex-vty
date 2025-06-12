@@ -40,13 +40,14 @@ resizeRectangle inp = do
         _ -> Nothing) inp
   rec
   -- TODO: Code to handle resizing
-  -- We need a way to resize rectangle dynamically
-  -- For now, we will keep the width constant
-  -- and allow height to change when the user clicks and drags
-  -- the vertical edges of the rectangle.
+  -- We need a way to dynamically resize the rectangle.
+  -- For now, we can change the top position and height,
+  -- meaning we can move the top and bottom edges.
+  -- For the next change, we will leave the left edge 
+  -- fixed (initialX) and want to be able to change the
+  -- width when we drag the right edge.
     topDyn    <- foldDyn ($) 5 topUpdate
     heightDyn <- foldDyn ($) 5 heightUpdate
-
     let edgeClick = attachPromptlyDynWithMaybe
           (\(top, h) (x, y) ->
             if y == top
@@ -54,13 +55,11 @@ resizeRectangle inp = do
             else if y == top + h-1
             then Just (BottomEdge, y)
             else Nothing) (zipDyn topDyn heightDyn) mouseDownEvent
-    
     resizingDyn <- holdDyn Nothing $
       leftmost
         [ Just <$> edgeClick
         , Nothing <$ mouseUpEvent 
         ]
-    
     let dragging = fmap isJust resizingDyn
         resizing = gate (current dragging) mouseDownEvent
         heightUpdate = attachWithMaybe
@@ -82,11 +81,6 @@ resizeRectangle inp = do
                    else Nothing
               _ -> Nothing)
           (current resizingDyn) resizing
-  -- Actually the topUpdate don't work correctly, we can
-  -- resize correctly with the bottom edge  and we can
-  -- reduce the height with the top edge but when we try
-  -- to increase the height with the top edge the rectangle
-  -- changes height but the top edge don't change it position
         topUpdate = attachWithMaybe
           (\res (_, y) ->
             case res of
