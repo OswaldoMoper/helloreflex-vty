@@ -14,6 +14,7 @@ import           Data.Maybe (isJust)
 data ResizeEdge = TopEdge 
                 | BottomEdge 
                 | RightEdge
+                | LeftEdge
                 deriving (Eq)
 
 main :: IO ()
@@ -30,7 +31,6 @@ resizeRectangle :: (HasDisplayRegion t m, HasImageWriter t m, HasTheme t m, Perf
                 => Event t V.Event -> m ()
 resizeRectangle inp = do
   let lText = "¡Hello, Reflex-VTY!"
-      initialX = 10
       minWidth = length lText + 2
       minHeight = 3
       mouseDownEvent = fmapMaybe (\case
@@ -42,13 +42,14 @@ resizeRectangle inp = do
   rec
   -- TODO: Code to handle resizing
   -- We need a way to dynamically resize the rectangle.
-  -- For now, we can change the top position and height,
+  -- For now, we can resize in vertical direction,
   -- meaning we can move the top and bottom edges.
-  -- For the next change, we will leave the left edge 
-  -- fixed (initialX) and want to be able to change the
-  -- width when we drag the right edge.
+  -- Also, we can move the right edge.
+  -- For the next change, we want to be able to move
+  -- the left edge as well.
     topDyn    <- foldDyn ($) 5 topUpdate
     heightDyn <- foldDyn ($) 5 heightUpdate
+    leftDyn   <- foldDyn ($) 10 leftUpdate
     widthDyn  <- foldDyn ($) 21 widthUpdate
     let edgeClick = attachPromptlyDynWithMaybe
           (\(top, h, w) (x, y) ->
