@@ -13,6 +13,7 @@ import           Data.Maybe (isJust)
 
 data ResizeEdge = TopEdge 
                 | BottomEdge 
+                | RightEdge
                 deriving (Eq)
 
 main :: IO ()
@@ -30,7 +31,7 @@ resizeRectangle :: (HasDisplayRegion t m, HasImageWriter t m, HasTheme t m, Perf
 resizeRectangle inp = do
   let lText = "¡Hello, Reflex-VTY!"
       initialX = 10
-      initialWidth = max 16 (length lText + 2)
+      minWidth = length lText + 2
       minHeight = 3
       mouseDownEvent = fmapMaybe (\case
         V.EvMouseDown x y _ _ -> Just (x, y)
@@ -48,13 +49,18 @@ resizeRectangle inp = do
   -- width when we drag the right edge.
     topDyn    <- foldDyn ($) 5 topUpdate
     heightDyn <- foldDyn ($) 5 heightUpdate
+    widthDyn  <- foldDyn ($) 21 widthUpdate
     let edgeClick = attachPromptlyDynWithMaybe
-          (\(top, h) (x, y) ->
-            if y == top
+          (\(top, h, w) (x, y) ->
+            if y == top && x >= initialX && x <= initialX + w 
             then Just (TopEdge, y)
-            else if y == top + h-1
+            else if y == top + h && x >= initialX && x <= initialX + w
             then Just (BottomEdge, y)
-            else Nothing) (zipDyn topDyn heightDyn) mouseDownEvent
+            else if x == initialX + w && y >= top && y <= top + h
+            then Just (RightEdge, x)
+            else Nothing)
+          (zipDynWith (\top (h, w) -> (top, h, w)) topDyn (zipDyn heightDyn widthDyn))
+          mouseDownEvent
     resizingDyn <- holdDyn Nothing $
       leftmost
         [ Just <$> edgeClick
@@ -91,9 +97,19 @@ resizeRectangle inp = do
                    else Nothing
               _ -> Nothing)
           (current resizingDyn) resizing
+        widthUpdate = attachWithMaybe
+          (\res (x, _) ->
+            case res of
+              Just (RightEdge, x0) ->
+                let delta = x - x0
+                in if delta /= 0
+                   then Just $ \w -> max minWidth (w + delta)
+                   else Nothing
+              _ -> Nothing)
+          (current resizingDyn) resizing
   let drawDyn = zipDynWith
-        (\top h -> drawRect initialX top initialWidth h lText)
-        topDyn heightDyn
+        (\top (h, w) -> drawRect initialX top w h lText)
+        topDyn (zipDyn heightDyn widthDyn)
   tellImages $ fmap (:[]) (current drawDyn)
 
 drawRect :: Int -> Int -> Int -> Int -> String -> V.Image
