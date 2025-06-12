@@ -92,7 +92,7 @@ resizeRectangle inp = do
             case res of
               Just (TopEdge, y0) ->
                 let delta = y - y0
-                in if delta >= 0
+                in if delta /= 0
                    then Just (+ delta)
                    else Nothing
               _ -> Nothing)
