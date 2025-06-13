@@ -13,8 +13,8 @@ import           Data.Maybe (isJust)
 
 data ResizeEdge = TopEdge 
                 | BottomEdge 
-                | RightEdge
                 | LeftEdge
+                | RightEdge
                 deriving (Eq)
 
 main :: IO ()
@@ -40,27 +40,22 @@ resizeRectangle inp = do
         V.EvMouseUp{} -> Just ()
         _ -> Nothing) inp
   rec
-  -- TODO: Code to handle resizing
-  -- We need a way to dynamically resize the rectangle.
-  -- For now, we can resize in vertical direction,
-  -- meaning we can move the top and bottom edges.
-  -- Also, we can move the right edge.
-  -- For the next change, we want to be able to move
-  -- the left edge as well.
     topDyn    <- foldDyn ($) 5 topUpdate
     heightDyn <- foldDyn ($) 5 heightUpdate
     leftDyn   <- foldDyn ($) 10 leftUpdate
     widthDyn  <- foldDyn ($) 21 widthUpdate
     let edgeClick = attachPromptlyDynWithMaybe
-          (\(top, h, w) (x, y) ->
-            if y == top && x >= initialX && x <= initialX + w 
+          (\(top, h, w, left) (x, y) ->
+            if y == top && x >= left && x <= left + w 
             then Just (TopEdge, y)
-            else if y == top + h && x >= initialX && x <= initialX + w
+            else if y == top + h && x >= left && x <= left + w
             then Just (BottomEdge, y)
-            else if x == initialX + w && y >= top && y <= top + h
+            else if x == left && y >= top && y <= top + h
+            then Just (LeftEdge, x)
+            else if x == left + w && y >= top && y <= top + h
             then Just (RightEdge, x)
             else Nothing)
-          (zipDynWith (\top (h, w) -> (top, h, w)) topDyn (zipDyn heightDyn widthDyn))
+          (zipDynWith (\(top, h) (w, left) -> (top, h, w, left)) (zipDyn topDyn heightDyn) (zipDyn widthDyn leftDyn))
           mouseDownEvent
     resizingDyn <- holdDyn Nothing $
       leftmost
@@ -101,6 +96,11 @@ resizeRectangle inp = do
         widthUpdate = attachWithMaybe
           (\res (x, _) ->
             case res of
+              Just (LeftEdge, x0) ->
+                let delta = x0 - x
+                in if delta /= 0
+                   then Just $ \w -> max minWidth (w + delta)
+                   else Nothing
               Just (RightEdge, x0) ->
                 let delta = x - x0
                 in if delta /= 0
@@ -108,9 +108,19 @@ resizeRectangle inp = do
                    else Nothing
               _ -> Nothing)
           (current resizingDyn) resizing
+        leftUpdate = attachWithMaybe
+          (\res (x, _) ->
+            case res of
+              Just (LeftEdge, x0) ->
+                let delta = x - x0
+                in if delta /= 0
+                   then Just (+ delta)
+                   else Nothing
+              _ -> Nothing)
+          (current resizingDyn) resizing
   let drawDyn = zipDynWith
-        (\top (h, w) -> drawRect initialX top w h lText)
-        topDyn (zipDyn heightDyn widthDyn)
+        (\(top, h) (w, left) -> drawRect left top w h lText)
+        (zipDyn topDyn heightDyn) (zipDyn widthDyn leftDyn)
   tellImages $ fmap (:[]) (current drawDyn)
 
 drawRect :: Int -> Int -> Int -> Int -> String -> V.Image
