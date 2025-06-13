@@ -1,80 +1,152 @@
 {-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE RecursiveDo       #-}
 
 module Main where
 
+import Control.Monad.Fix (MonadFix)
 import qualified Graphics.Vty as V
 import           Reflex
 import           Reflex.Vty
-import Control.Monad.Fix (MonadFix)
+import           Data.Maybe (isJust)
+
+data ResizeOrDrag = TopEdge 
+                  | BottomEdge 
+                  | LeftEdge
+                  | RightEdge
+                  | Inside
+                  deriving (Eq)
 
 main :: IO ()
 main = mainWidget $ initManager_ $ do
   inp <- input
-  dragNResize inp
+  dragNRezize inp
   let quitEvent = fforMaybe inp $ \case
         V.EvKey V.KEsc [] -> Just ()
         V.EvKey (V.KChar 'c') [V.MCtrl] -> Just ()
         _ -> Nothing
   return quitEvent
 
-dragNResize ::
-  ( HasDisplayRegion t m
-  , HasImageWriter t m
-  , HasTheme t m
-  , PerformEvent t m
-  , MonadHold t m
-  , TriggerEvent t m
-  , MonadFix m
-  ) => Event t V.Event -> m ()
-dragNResize inp = do
-  let initialPosition = (0, 0)
-      initialWidth = 16
-      initialHeight = 5
-
-      posEvent = fmapMaybe (\case
+dragNRezize :: (HasDisplayRegion t m, HasImageWriter t m, HasTheme t m, PerformEvent t m, MonadHold t m, TriggerEvent t m, MonadFix m, MonadSample t (Performable m))
+                => Event t V.Event -> m ()
+dragNRezize inp = do
+  let lText = "¡Hello, Reflex-VTY!"
+      minWidth = length lText + 2
+      minHeight = 3
+      mouseDownEvent = fmapMaybe (\case
         V.EvMouseDown x y _ _ -> Just (x, y)
-        _                     -> Nothing) inp
-
-      releaseEvent = fmapMaybe (\case
-        V.EvMouseUp{} -> Just ()
-        _             -> Nothing) inp
-
-      sizeChangeEvent = fmapMaybe (\case
-        V.EvKey (V.KChar '+') [] -> Just (1, 1)
-        V.EvKey (V.KChar '-') [] -> Just (-1, -1)
         _ -> Nothing) inp
+      mouseUpEvent = fmapMaybe (\case
+        V.EvMouseUp{} -> Just ()
+        _ -> Nothing) inp
+  rec
+    topDyn    <- foldDyn ($) 5 topUpdate
+    heightDyn <- foldDyn ($) 5 heightUpdate
+    leftDyn   <- foldDyn ($) 10 leftUpdate
+    widthDyn  <- foldDyn ($) 21 widthUpdate
+    let edgeClick = attachPromptlyDynWithMaybe
+          (\(top, h, w, left) (x, y) ->
+            if y == top && x >= left && x <= left + w 
+            then Just (TopEdge, x, y)
+            else if y == top + h && x >= left && x <= left + w
+            then Just (BottomEdge, x, y)
+            else if x == left && y >= top && y <= top + h
+            then Just (LeftEdge, x, y)
+            else if x == left + w && y >= top && y <= top + h
+            then Just (RightEdge, x, y)
+            else if x > left + 1 && x < left + w - 1 && y > top + 1 && y < top + h - 1
+            then Just (Inside, x, y)
+            else Nothing)
+          (zipDynWith (\(top, h) (w, left) -> (top, h, w, left)) (zipDyn topDyn heightDyn) (zipDyn widthDyn leftDyn))
+          mouseDownEvent
+    resizingDyn <- holdDyn Nothing $
+      leftmost
+        [ Just <$> edgeClick
+        , Nothing <$ mouseUpEvent 
+        ]
+    let dragging = fmap isJust resizingDyn
+        resizing = gate (current dragging) mouseDownEvent
+        heightUpdate = attachWithMaybe
+          (\res (_, y) ->
+            case res of
+              Just (TopEdge, _, y0) ->
+                let delta = y0 - y
+                in if delta /=0
+                   then Just $ \h ->
+                     let newHeight = h + delta
+                     in max minHeight newHeight
+                   else Nothing
+              Just (BottomEdge, _, y0) ->
+                let delta = y - y0
+                in if delta /= 0
+                   then Just $ \h ->
+                     let newHeight = h + delta
+                     in max minHeight newHeight
+                   else Nothing
+              _ -> Nothing)
+          (current resizingDyn) resizing
+        topUpdate = attachWithMaybe
+          (\res (_, y) ->
+            case res of
+              Just (TopEdge, _, y0) ->
+                let delta = y - y0
+                in if delta /= 0
+                   then Just (+ delta)
+                   else Nothing
+              Just (Inside, _, y0) ->
+                let delta = y - y0
+                in if delta /= 0
+                   then Just (+ delta)
+                   else Nothing
+              _ -> Nothing)
+          (current resizingDyn) resizing
+        widthUpdate = attachWithMaybe
+          (\res (x, _) ->
+            case res of
+              Just (LeftEdge, x0, _) ->
+                let delta = x0 - x
+                in if delta /= 0
+                   then Just $ \w -> max minWidth (w + delta)
+                   else Nothing
+              Just (RightEdge, x0, _) ->
+                let delta = x - x0
+                in if delta /= 0
+                   then Just $ \w -> max minWidth (w + delta)
+                   else Nothing
+              _ -> Nothing)
+          (current resizingDyn) resizing
+        leftUpdate = attachWithMaybe
+          (\res (x, _) ->
+            case res of
+              Just (LeftEdge, x0, _) ->
+                let delta = x - x0
+                in if delta /= 0
+                   then Just (+ delta)
+                   else Nothing
+              Just (Inside, x0, _) ->
+                let delta = x - x0
+                in if delta /= 0
+                   then Just (+ delta)
+                   else Nothing
+              _ -> Nothing)
+          (current resizingDyn) resizing
+  let drawDyn = zipDynWith
+        (\(top, h) (w, left) -> drawRect left top w h lText)
+        (zipDyn topDyn heightDyn) (zipDyn widthDyn leftDyn)
+  tellImages $ fmap (:[]) (current drawDyn)
 
-  widthDyn <- foldDyn (\(dw, _) w -> max 5 (w + dw)) initialWidth sizeChangeEvent
-  heightDyn <- foldDyn (\(_, dh) h -> max 3 (h + dh)) initialHeight sizeChangeEvent
-
-  lastValidPos <- holdDyn initialPosition posEvent
-  let startDragEvent = fmapMaybe (\(clickPos, lastPos) ->
-        if isClickOn clickPos lastPos initialWidth initialHeight
-        then Just clickPos
-        else Nothing) (attach (current lastValidPos) posEvent)
-  
-  dragging <- holdDyn False $ leftmost [True <$ startDragEvent, False <$ releaseEvent]
-  let filteredMovement = gate (current dragging) posEvent
-  finalPos <- holdDyn initialPosition filteredMovement
-
-  tellImages $ current $ zipDynWith (\(x, y) (w, h) -> [drawRect x y w h]) finalPos (zipDyn widthDyn heightDyn)
-
-drawRect :: Int -> Int -> Int -> Int -> V.Image
-drawRect x y w h =
-  let lText = "Hello World"
-      topBottom = V.string V.defAttr ("╭" ++ replicate (w - 2) '─' ++ "╮")
+drawRect :: Int -> Int -> Int -> Int -> String -> V.Image
+drawRect x y w h lText =
+  let topBottom = V.string V.defAttr ("╭" ++ replicate (w - 2) '─' ++ "╮")
       emptyRow = V.string V.defAttr ("│" ++ replicate (w - 2) ' ' ++ "│")
+      bottomRow = V.string V.defAttr ("╰" ++ replicate (w - 2) '─' ++ "╯")
+
       textPaddingLeft = (w - 2 - length lText) `div` 2
       textPaddingRight = (w - 2 - length lText) - textPaddingLeft
       textRow = V.string V.defAttr ("│" ++ replicate textPaddingLeft ' ' ++ lText ++ replicate textPaddingRight ' ' ++ "│")
-      bottomRow = V.string V.defAttr ("╰" ++ replicate (w - 2) '─' ++ "╯")
+
       textRowPosition = (h - 3) `div` 2
       rowsBefore = replicate textRowPosition emptyRow
       rowsAfter = replicate (h - 3 - textRowPosition) emptyRow
   in V.translate x y $ V.vertCat ([topBottom] ++ rowsBefore ++ [textRow] ++ rowsAfter ++ [bottomRow])
-
-isClickOn :: (Int, Int) -> (Int, Int) -> Int -> Int -> Bool
-isClickOn (clickX, clickY) (x_rect, y_rect) w_rect h_rect =
-  clickX >= x_rect && clickX < (x_rect + w_rect) && clickY >= y_rect && clickY < (y_rect + h_rect)
