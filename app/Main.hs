@@ -1,23 +1,14 @@
-{-# LANGUAGE FlexibleContexts  #-}
-{-# LANGUAGE LambdaCase        #-}
-{-# LANGUAGE OverloadedStrings #-}
+-- {-# LANGUAGE FlexibleContexts  #-}
+-- {-# LANGUAGE LambdaCase        #-}
+-- {-# LANGUAGE OverloadedStrings #-}
+-- {-# LANGUAGE RecursiveDo       #-}
 
-module Main where
+-- module Main where
 
-import           Data.Text    (pack)
-import qualified Graphics.Vty as V
-import           Reflex
-import           Reflex.Vty
+-- import Control.Monad.Fix (MonadFix)
+-- import qualified Graphics.Vty as V
+-- import           Reflex
+-- import           Reflex.Vty
+-- import           Data.Maybe (isJust)
 
-main :: IO ()
-main = mainWidget $ initManager_ $ do
-  inp <- input
-  simpleHelloWorld
-  let quitEvent = fforMaybe inp $ \case
-        V.EvKey V.KEsc [] -> Just ()
-        V.EvKey (V.KChar 'c') [V.MCtrl] -> Just ()
-        _ -> Nothing
-  return quitEvent
-
-simpleHelloWorld :: (HasDisplayRegion t m, HasImageWriter t m, HasTheme t m) => m ()
-simpleHelloWorld = text ( pure ( pack $ concat (replicate 13 "\n") ++ replicate 43 ' ' ++ "¡Hello, Reflex-VTY!" ) )
+-- This module will be a menu for the other modules
