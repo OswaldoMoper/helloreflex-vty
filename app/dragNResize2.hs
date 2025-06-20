@@ -150,7 +150,8 @@ dragNRezize inp = do
               Just (OnText, x0, _, w, _) ->
                 let delta = x - x0
                 in if delta /= 0
-                  then Just $ \offset -> max 0 ( offset + delta )
+                  then Just $ \offset -> 
+                    absOffset ((w `div` 2) - 2) (2 - (w `div` 2)) (offset + delta)
                   else Nothing
               _ -> Nothing)
           (current resizingDyn) resizing
@@ -160,7 +161,8 @@ dragNRezize inp = do
               Just (OnText, _, y0, _, h) ->
                 let delta = y - y0
                 in if delta /= 0
-                  then Just $ \offset -> max 0 ( offset + delta )
+                  then Just $ \offset ->
+                    absOffset ((h `div` 2) - 2) (2 - (h `div` 2)) (offset + delta) 
                   else Nothing
               _ -> Nothing)
           (current resizingDyn) resizing
@@ -187,3 +189,8 @@ drawRect x y w h offsetX offsetY lText =
       rowsBefore = replicate textRowPosition emptyRow
       rowsAfter = replicate (h - 3 - textRowPosition) emptyRow
   in V.translate x y $ V.vertCat ([topBottom] ++ rowsBefore ++ [textRow] ++ rowsAfter ++ [bottomRow])
+
+absOffset :: Ord a => a -> a -> a -> a
+absOffset maxO minO offset | maxO < offset = maxO
+                           | minO > offset = minO
+                           | otherwise     = offset
