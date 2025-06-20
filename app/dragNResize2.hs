@@ -55,17 +55,17 @@ dragNRezize inp = do
                 textColXEnd = textColX + length lText
             in
               if y == textRowY && x >= textColX && x < textColXEnd
-              then Just (OnText, x, y)
+              then Just (OnText, x, y, w, h)
               else if x > left + 1 && x < left + w - 1 && y > top + 1 && y < top + h - 1
-              then Just (Inside, x, y)
+              then Just (Inside, x, y, w, h)
               else if y == top && x >= left && x <= left + w 
-              then Just (TopEdge, x, y)
+              then Just (TopEdge, x, y, w, h)
               else if y == top + h && x >= left && x <= left + w
-              then Just (BottomEdge, x, y)
+              then Just (BottomEdge, x, y, w, h)
               else if x == left && y >= top && y <= top + h
-              then Just (LeftEdge, x, y)
+              then Just (LeftEdge, x, y, w, h)
               else if x == left + w && y >= top && y <= top + h
-              then Just (RightEdge, x, y)
+              then Just (RightEdge, x, y, w, h)
               else Nothing)
           (zipDyn
             (zipDyn
@@ -83,14 +83,14 @@ dragNRezize inp = do
         heightUpdate = attachWithMaybe
           (\res (_, y) ->
             case res of
-              Just (TopEdge, _, y0) ->
+              Just (TopEdge, _, y0, _, _) ->
                 let delta = y0 - y
                 in if delta /=0
                    then Just $ \h ->
                      let newHeight = h + delta
                      in max minHeight newHeight
                    else Nothing
-              Just (BottomEdge, _, y0) ->
+              Just (BottomEdge, _, y0, _, _) ->
                 let delta = y - y0
                 in if delta /= 0
                    then Just $ \h ->
@@ -102,12 +102,12 @@ dragNRezize inp = do
         topUpdate = attachWithMaybe
           (\res (_, y) ->
             case res of
-              Just (TopEdge, _, y0) ->
+              Just (TopEdge, _, y0, _, _) ->
                 let delta = y - y0
                 in if delta /= 0
                    then Just (+ delta)
                    else Nothing
-              Just (Inside, _, y0) ->
+              Just (Inside, _, y0, _, _) ->
                 let delta = y - y0
                 in if delta /= 0
                    then Just (+ delta)
@@ -117,12 +117,12 @@ dragNRezize inp = do
         widthUpdate = attachWithMaybe
           (\res (x, _) ->
             case res of
-              Just (LeftEdge, x0, _) ->
+              Just (LeftEdge, x0, _, _ , _) ->
                 let delta = x0 - x
                 in if delta /= 0
                    then Just $ \w -> max minWidth (w + delta)
                    else Nothing
-              Just (RightEdge, x0, _) ->
+              Just (RightEdge, x0, _, _, _) ->
                 let delta = x - x0
                 in if delta /= 0
                    then Just $ \w -> max minWidth (w + delta)
@@ -132,12 +132,12 @@ dragNRezize inp = do
         leftUpdate = attachWithMaybe
           (\res (x, _) ->
             case res of
-              Just (LeftEdge, x0, _) ->
+              Just (LeftEdge, x0, _, _, _) ->
                 let delta = x - x0
                 in if delta /= 0
                    then Just (+ delta)
                    else Nothing
-              Just (Inside, x0, _) ->
+              Just (Inside, x0, _, _, _) ->
                 let delta = x - x0
                 in if delta /= 0
                    then Just (+ delta)
@@ -147,20 +147,20 @@ dragNRezize inp = do
         textOffsetXUpdate = attachWithMaybe
           (\res (x, _) ->
             case res of
-              Just (OnText, x0, _) ->
+              Just (OnText, x0, _, w, _) ->
                 let delta = x - x0
                 in if delta /= 0
-                  then Just (+ delta)
+                  then Just $ \offset -> max 0 ( offset + delta )
                   else Nothing
               _ -> Nothing)
           (current resizingDyn) resizing
         textOffsetYUpdate = attachWithMaybe
           (\res (_, y) ->
             case res of
-              Just (OnText, _, y0) ->
+              Just (OnText, _, y0, _, h) ->
                 let delta = y - y0
                 in if delta /= 0
-                  then Just (+ delta)
+                  then Just $ \offset -> max 0 ( offset + delta )
                   else Nothing
               _ -> Nothing)
           (current resizingDyn) resizing
