@@ -68,7 +68,7 @@ dragNRezize inp = do
             in
               if y == textRowY && x >= textColX && x < textColXEnd
               then Just (Content, x, y, w, h)
-              else if x > left + 1 && x < left + w - 1 && y > top + 1 && y < top + 4
+              else if x > left + 1 && x < left + w - 1 && y > top && y < top + 3
               then Just (Header, x, y, w, h)
               else if y == top && x >= left && x <= left + w 
               then Just (TopEdge, x, y, w, h)
@@ -193,18 +193,24 @@ drawRect x y w h offsetX offsetY titleText contentText =
       emptyRow     = V.string V.defAttr ("│" ++ replicate (w - 2) ' ' ++ "│")
       bottomBorder = V.string V.defAttr ("╰" ++ replicate (w - 2) '─' ++ "╯")
 
-      buttonsText       = " -  ▢  X "
-      availableWidth    = w - 2
-      maxTitleLen       = availableWidth - length buttonsText
-      trimmedTitle      = take maxTitleLen titleText
-      titlePadding      = max 0 (availableWidth - length trimmedTitle - length buttonsText) `div` 2
-      refactor          = w - (2 * titlePadding) - length trimmedTitle - length buttonsText - 2
-      titleRow          = V.string V.defAttr ("│" ++ replicate (titlePadding + refactor) ' ' ++ trimmedTitle ++ replicate titlePadding ' ' ++ buttonsText ++ "│")
-      separatorRow      = V.string V.defAttr ("├" ++ replicate (w - 2) '─' ++ "┤")
+      buttonsText    = " -  ▢  X "
+      availableWidth = w - 2
+      maxTitleLen    = availableWidth - length buttonsText
+      trimmedTitle   = take maxTitleLen titleText
+      titlePadding   = max 0 (availableWidth - length trimmedTitle) `div` 2
+      titlePaddingR  = w - 2 - titlePadding - length buttonsText - length trimmedTitle
+      centerTitle    | length buttonsText > titlePadding = titlePadding - length buttonsText
+                     | otherwise                         = 0
+      titleRow       = V.string V.defAttr ("│" ++ replicate (titlePadding + centerTitle) ' '
+                                          ++ trimmedTitle ++ replicate titlePaddingR ' ' 
+                                          ++ buttonsText ++ "│")
+      separatorRow   = 
+        V.string V.defAttr ("├" ++ replicate (w - 2) '─' ++ "┤")
 
       contentPaddingLeft  = max 0 (min (w - 2 - length contentText) ((w - 2 - length contentText) `div` 2 + offsetX))
       contentPaddingRight = w - 2 - length contentText - contentPaddingLeft
-      contentRow          = V.string V.defAttr ("│" ++ replicate contentPaddingLeft ' ' ++ contentText ++ replicate contentPaddingRight ' ' ++ "│")
+      contentRow          = V.string V.defAttr ("│" ++ replicate contentPaddingLeft ' ' 
+                                               ++ contentText ++ replicate contentPaddingRight ' ' ++ "│")
 
       contentHeight = h - 4
       contentPaddingTop = max 0 (min contentHeight ((contentHeight `div` 2) + offsetY)) 
