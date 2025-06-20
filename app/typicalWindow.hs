@@ -11,13 +11,25 @@ import           Reflex
 import           Reflex.Vty
 import           Data.Maybe (isJust)
 
-data ResizeOrDrag = TopEdge 
-                  | BottomEdge 
-                  | LeftEdge
-                  | RightEdge
-                  | OnText
-                  | Inside
+data ClickAction = TopEdge 
+                 | BottomEdge 
+                 | LeftEdge
+                 | RightEdge
+                 | Content
+                 | Header
+                 deriving (Eq)
+
+data HeaderAction = DragWindow
+                  | Minimize
+                  | FullScreen
+                  | Close
                   deriving (Eq)
+
+data ContentAction = DragContent
+                   | Other String
+                   deriving (Eq, Show)
+
+-- TODO: add functions to implement buttonActions
 
 main :: IO ()
 main = mainWidget $ initManager_ $ do
@@ -55,9 +67,9 @@ dragNRezize inp = do
                 textColXEnd = textColX + length lText
             in
               if y == textRowY && x >= textColX && x < textColXEnd
-              then Just (OnText, x, y, w, h)
+              then Just (Content, x, y, w, h)
               else if x > left + 1 && x < left + w - 1 && y > top + 1 && y < top + 4
-              then Just (Inside, x, y, w, h)
+              then Just (Header, x, y, w, h)
               else if y == top && x >= left && x <= left + w 
               then Just (TopEdge, x, y, w, h)
               else if y == top + h && x >= left && x <= left + w
@@ -107,7 +119,7 @@ dragNRezize inp = do
                 in if delta /= 0
                    then Just (+ delta)
                    else Nothing
-              Just (Inside, _, y0, _, _) ->
+              Just (Header, _, y0, _, _) ->
                 let delta = y - y0
                 in if delta /= 0
                    then Just (+ delta)
@@ -137,7 +149,7 @@ dragNRezize inp = do
                 in if delta /= 0
                    then Just (+ delta)
                    else Nothing
-              Just (Inside, x0, _, _, _) ->
+              Just (Header, x0, _, _, _) ->
                 let delta = x - x0
                 in if delta /= 0
                    then Just (+ delta)
@@ -147,7 +159,7 @@ dragNRezize inp = do
         textOffsetXUpdate = attachWithMaybe
           (\res (x, _) ->
             case res of
-              Just (OnText, x0, _, w, _) ->
+              Just (Content, x0, _, w, _) ->
                 let delta = x - x0
                 in if delta /= 0
                   then Just $ \offset -> 
@@ -158,7 +170,7 @@ dragNRezize inp = do
         textOffsetYUpdate = attachWithMaybe
           (\res (_, y) ->
             case res of
-              Just (OnText, _, y0, _, h) ->
+              Just (Content, _, y0, _, h) ->
                 let delta = y - y0
                 in if delta /= 0
                   then Just $ \offset ->
@@ -181,7 +193,7 @@ drawRect x y w h offsetX offsetY titleText contentText =
       emptyRow     = V.string V.defAttr ("│" ++ replicate (w - 2) ' ' ++ "│")
       bottomBorder = V.string V.defAttr ("╰" ++ replicate (w - 2) '─' ++ "╯")
 
-      buttonsText       = " - ▢ X "
+      buttonsText       = " -  ▢  X "
       availableWidth    = w - 2
       maxTitleLen       = availableWidth - length buttonsText
       trimmedTitle      = take maxTitleLen titleText
