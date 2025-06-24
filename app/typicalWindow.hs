@@ -5,18 +5,18 @@
 
 module Main where
 
-import Control.Monad.Fix (MonadFix)
-import qualified Graphics.Vty as V
+import           Control.Monad.Fix (MonadFix)
+import           Data.Maybe        (isJust)
+import qualified Graphics.Vty      as V
 import           Reflex
 import           Reflex.Vty
-import           Data.Maybe (isJust)
 
-data ClickAction = TopEdge 
-                 | BottomEdge 
+data ClickAction = TopEdge
+                 | BottomEdge
                  | LeftEdge
                  | RightEdge
                  | Content
-                 | Header
+                 | Header HeaderAction
                  deriving (Eq)
 
 data HeaderAction = DragWindow
@@ -26,7 +26,7 @@ data HeaderAction = DragWindow
                   deriving (Eq)
 
 data ContentAction = DragContent
-                   | Other String
+                   | String
                    deriving (Eq, Show)
 
 -- TODO: add functions to implement buttonActions
@@ -34,15 +34,18 @@ data ContentAction = DragContent
 main :: IO ()
 main = mainWidget $ initManager_ $ do
   inp <- input
-  dragNRezize inp
-  let quitEvent = fforMaybe inp $ \case
-        V.EvKey V.KEsc [] -> Just ()
-        V.EvKey (V.KChar 'c') [V.MCtrl] -> Just ()
-        _ -> Nothing
+  quitEventFromClick <- dragNRezize inp
+  let quitEvent = leftmost
+        [ fforMaybe inp $ \case
+            V.EvKey V.KEsc [] -> Just ()
+            V.EvKey (V.KChar 'c') [V.MCtrl] -> Just ()
+            _ -> Nothing
+        , quitEventFromClick
+        ]
   return quitEvent
 
 dragNRezize :: (HasDisplayRegion t m, HasImageWriter t m, HasTheme t m, PerformEvent t m, MonadHold t m, TriggerEvent t m, MonadFix m, MonadSample t (Performable m))
-                => Event t V.Event -> m ()
+            => Event t V.Event -> m (Event t ())
 dragNRezize inp = do
   let lText = "¡Hello, Reflex-VTY!"
       minWidth = length lText + 2
@@ -62,15 +65,21 @@ dragNRezize inp = do
     textOffsetYDyn <- foldDyn ($) 0 textOffsetYUpdate
     let edgeClick = attachPromptlyDynWithMaybe
           (\(((top, h), (w, left)), (tx, ty)) (x, y) ->
-            let textRowY = top + 1 + ((h - 3) `div` 2) + ty
+            let textRowY = top + 3 + ((h - 3) `div` 2) + ty
                 textColX = left + 1 + ((w - 2 - length lText) `div` 2) + tx
                 textColXEnd = textColX + length lText
             in
               if y == textRowY && x >= textColX && x < textColXEnd
               then Just (Content, x, y, w, h)
-              else if x > left + 1 && x < left + w - 1 && y > top && y < top + 3
-              then Just (Header, x, y, w, h)
-              else if y == top && x >= left && x <= left + w 
+              else if y > top && y < top + 3
+              then if x == left + w - 3
+                   then Just (Header Close, x, y, w, h)
+                   else if x == left + w - 6
+                   then Just (Header FullScreen, x, y, w, h)
+                   else if x == left + w - 9
+                   then Just (Header Minimize, x, y, w, h)
+                   else Just (Header DragWindow, x, y, w, h)
+              else if y == top && x >= left && x <= left + w
               then Just (TopEdge, x, y, w, h)
               else if y == top + h && x >= left && x <= left + w
               then Just (BottomEdge, x, y, w, h)
@@ -85,12 +94,28 @@ dragNRezize inp = do
               (zipDyn widthDyn leftDyn))
             (zipDyn textOffsetXDyn textOffsetYDyn))
           mouseDownEvent
+    minimizedDyn <- foldDyn ($) False $ leftmost
+      [ const True  <$ minimizeClickEvent
+      , const False <$ fullScreenClickEvent
+      ]
     resizingDyn <- holdDyn Nothing $
       leftmost
         [ Just <$> edgeClick
-        , Nothing <$ mouseUpEvent 
+        , Nothing <$ mouseUpEvent
         ]
-    let dragging = fmap isJust resizingDyn
+    let minimizeClickEvent = fmapMaybe (\case
+            (Header Minimize, _, _, _, _) -> Just ()
+            _                             -> Nothing)
+          $ fmapMaybe id (updated resizingDyn)
+        fullScreenClickEvent = fmapMaybe (\case
+            (Header FullScreen, _, _, _, _) -> Just ()
+            _                               -> Nothing)
+          $ fmapMaybe id (updated resizingDyn)
+        quitClickEvent = fmapMaybe (\case
+            (Header Close, _, _, _, _) -> Just ()
+            _ -> Nothing)
+          $ fmapMaybe id (updated resizingDyn)
+        dragging = fmap isJust resizingDyn
         resizing = gate (current dragging) mouseDownEvent
         heightUpdate = attachWithMaybe
           (\res (_, y) ->
@@ -119,7 +144,7 @@ dragNRezize inp = do
                 in if delta /= 0
                    then Just (+ delta)
                    else Nothing
-              Just (Header, _, y0, _, _) ->
+              Just (Header DragWindow, _, y0, _, _) ->
                 let delta = y - y0
                 in if delta /= 0
                    then Just (+ delta)
@@ -149,7 +174,7 @@ dragNRezize inp = do
                 in if delta /= 0
                    then Just (+ delta)
                    else Nothing
-              Just (Header, x0, _, _, _) ->
+              Just (Header DragWindow, x0, _, _, _) ->
                 let delta = x - x0
                 in if delta /= 0
                    then Just (+ delta)
@@ -162,7 +187,7 @@ dragNRezize inp = do
               Just (Content, x0, _, w, _) ->
                 let delta = x - x0
                 in if delta /= 0
-                  then Just $ \offset -> 
+                  then Just $ \offset ->
                     absOffset ((w `div` 2) - 2) (2 - (w `div` 2)) (offset + delta)
                   else Nothing
               _ -> Nothing)
@@ -174,50 +199,65 @@ dragNRezize inp = do
                 let delta = y - y0
                 in if delta /= 0
                   then Just $ \offset ->
-                    absOffset ((h `div` 2) - 2) (2 - (h `div` 2)) (offset + delta) 
+                    absOffset ((h `div` 2) - 2) (2 - (h `div` 2)) (offset + delta)
                   else Nothing
               _ -> Nothing)
           (current resizingDyn) resizing
   let drawDyn = zipDynWith
-        (\(top, h, w, left) (tx, ty) -> drawRect left top w h tx ty "Haskell" lText)
-        (zipDynWith (\(top, h) (w, left) -> (top, h, w, left))
-            (zipDyn topDyn heightDyn)
-            (zipDyn widthDyn leftDyn))
-        (zipDyn textOffsetXDyn textOffsetYDyn)
+        (\((top, h, w, left), (tx, ty)) minimized ->
+            drawRect left top w (if minimized then 2 else h) tx ty "Haskell" lText)
+        (zipDyn
+            (zipDynWith (\(top, h) (w, left) -> (top, h, w, left))
+                (zipDyn topDyn heightDyn)
+                (zipDyn widthDyn leftDyn))
+            (zipDyn textOffsetXDyn textOffsetYDyn))
+        minimizedDyn
 
   tellImages $ fmap (:[]) (current drawDyn)
+  return quitClickEvent
 
 drawRect :: Int -> Int -> Int -> Int -> Int -> Int -> String -> String -> V.Image
-drawRect x y w h offsetX offsetY titleText contentText =
-  let topBorder    = V.string V.defAttr ("╭" ++ replicate (w - 2) '─' ++ "╮")
-      emptyRow     = V.string V.defAttr ("│" ++ replicate (w - 2) ' ' ++ "│")
-      bottomBorder = V.string V.defAttr ("╰" ++ replicate (w - 2) '─' ++ "╯")
+drawRect x y w h offsetX offsetY titleText contentText
+  | h <= 2 =
+      let topBorder    = V.string V.defAttr ("╭" ++ replicate (w - 2) '─' ++ "╮")
+          buttonsText    = "▢  X "
+          availableWidth = w - 2
+          maxTitleLen    = availableWidth - length buttonsText
+          trimmedTitle   = take maxTitleLen titleText
+          titlePadding   = max 0 (availableWidth - length trimmedTitle - length buttonsText) `div` 2
+          titlePaddingR  = w - 2 - titlePadding - length buttonsText - length trimmedTitle
+          titleRow       = V.string V.defAttr ("│" ++ replicate titlePadding ' ' ++ trimmedTitle
+                                              ++ replicate titlePaddingR ' ' ++ buttonsText ++ "│")
+      in V.translate x y $ V.vertCat [topBorder, titleRow]
+  | otherwise = 
+      let topBorder    = V.string V.defAttr ("╭" ++ replicate (w - 2) '─' ++ "╮")
+          emptyRow     = V.string V.defAttr ("│" ++ replicate (w - 2) ' ' ++ "│")
+          bottomBorder = V.string V.defAttr ("╰" ++ replicate (w - 2) '─' ++ "╯")
 
-      buttonsText    = " -  ▢  X "
-      availableWidth = w - 2
-      maxTitleLen    = availableWidth - length buttonsText
-      trimmedTitle   = take maxTitleLen titleText
-      titlePadding   = max 0 (availableWidth - length trimmedTitle) `div` 2
-      titlePaddingR  = w - 2 - titlePadding - length buttonsText - length trimmedTitle
-      centerTitle    | length buttonsText > titlePadding = titlePadding - length buttonsText
-                     | otherwise                         = 0
-      titleRow       = V.string V.defAttr ("│" ++ replicate (titlePadding + centerTitle) ' '
-                                          ++ trimmedTitle ++ replicate titlePaddingR ' ' 
-                                          ++ buttonsText ++ "│")
-      separatorRow   = 
-        V.string V.defAttr ("├" ++ replicate (w - 2) '─' ++ "┤")
+          buttonsText    = "  -  ▢  X "
+          availableWidth = w - 2
+          maxTitleLen    = availableWidth - length buttonsText
+          trimmedTitle   = take maxTitleLen titleText
+          titlePadding   = max 0 (availableWidth - length trimmedTitle) `div` 2
+          centerTitle    | length buttonsText > titlePadding = titlePadding - length buttonsText
+                        | otherwise                         = 0
+          titlePaddingR  = w - 2 - titlePadding - length buttonsText - length trimmedTitle - centerTitle
+          titleRow       = V.string V.defAttr ("│" ++ replicate (titlePadding + centerTitle) ' '
+                                              ++ trimmedTitle ++ replicate titlePaddingR ' '
+                                              ++ buttonsText ++ "│")
+          separatorRow   =
+            V.string V.defAttr ("├" ++ replicate (w - 2) '─' ++ "┤")
 
-      contentPaddingLeft  = max 0 (min (w - 2 - length contentText) ((w - 2 - length contentText) `div` 2 + offsetX))
-      contentPaddingRight = w - 2 - length contentText - contentPaddingLeft
-      contentRow          = V.string V.defAttr ("│" ++ replicate contentPaddingLeft ' ' 
-                                               ++ contentText ++ replicate contentPaddingRight ' ' ++ "│")
+          contentPaddingLeft  = max 0 (min (w - 2 - length contentText) ((w - 2 - length contentText) `div` 2 + offsetX))
+          contentPaddingRight = w - 2 - length contentText - contentPaddingLeft
+          contentRow          = V.string V.defAttr ("│" ++ replicate contentPaddingLeft ' '
+                                                  ++ contentText ++ replicate contentPaddingRight ' ' ++ "│")
 
-      contentHeight = h - 4
-      contentPaddingTop = max 0 (min contentHeight ((contentHeight `div` 2) + offsetY)) 
-      -- textRowPosition = max 0 (min (h - 3) ((h - 3) `div` 2 + offsetY))
-      rowsBefore = replicate contentPaddingTop emptyRow
-      rowsAfter = replicate (contentHeight - contentPaddingTop) emptyRow
-  in V.translate x y $ V.vertCat ([topBorder, titleRow, separatorRow] ++ rowsBefore ++ [contentRow] ++ rowsAfter ++ [bottomBorder])
+          contentHeight = h - 4
+          contentPaddingTop = max 0 (min contentHeight ((contentHeight `div` 2) + offsetY))
+          rowsBefore = replicate contentPaddingTop emptyRow
+          rowsAfter = replicate (contentHeight - contentPaddingTop) emptyRow
+      in V.translate x y $ V.vertCat ([topBorder, titleRow, separatorRow] ++ rowsBefore ++ [contentRow] ++ rowsAfter ++ [bottomBorder])
 
 absOffset :: Ord a => a -> a -> a -> a
 absOffset maxO minO offset | maxO < offset = maxO
