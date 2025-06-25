@@ -24,12 +24,16 @@
           };
       };
       packages = {
-        default = self'.packages.hello-reflex-vty;
+        default        = self'.packages.hello-reflex-vty;
         dragHelloWorld = self'.packages.dragHelloWorld;
-        dragRectangle = self'.packages.dragRectangle;
+        dragRectangle  = self'.packages.dragRectangle;
+        dragEntity     = self'.packages.dragEntity;
+        resizeEntity   = self'.packages.resizeEntity;
+        dragNResize    = self'.packages.dragNResize;
+        typicalWindow  = self'.packages.typicalWindow;
       };
       apps = {
-        default = {
+        default        = {
           type = "app";
           program = "${self.packages.${system}.default}/bin/helloWorld";
         };
@@ -37,21 +41,25 @@
           type = "app";
           program = "${self.packages.${system}.default}/bin/dragHelloWorld";
         };
-        dragRectangle = {
+        dragRectangle  = {
           type = "app";
           program = "${self.packages.${system}.default}/bin/dragRectangle";
         };
-        dragEntity = {
+        dragEntity     = {
           type = "app";
           program = "${self.packages.${system}.default}/bin/dragEntity";
         };
-        resizeEntity = {
+        resizeEntity   = {
           type = "app";
           program = "${self.packages.${system}.default}/bin/resizeEntity";
         };
-        dragNResize = {
+        dragNResize    = {
           type = "app";
           program = "${self.packages.${system}.default}/bin/dragNResize";
+        };
+        typicalWindow  = {
+          type = "app";
+          program = "${self.packages.${system}.default}/bin/typicalWindow";
         };
       };
     };
