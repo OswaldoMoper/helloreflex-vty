@@ -10,6 +10,7 @@ import           Data.Maybe        (isJust)
 import qualified Graphics.Vty      as V
 import           Reflex
 import           Reflex.Vty
+import           Reflex.Vty.Widget
 
 data ClickAction = TopEdge
                  | BottomEdge
@@ -47,6 +48,7 @@ main = mainWidget $ initManager_ $ do
 dragNRezize :: (HasDisplayRegion t m, HasImageWriter t m, HasTheme t m, PerformEvent t m, MonadHold t m, TriggerEvent t m, MonadFix m, MonadSample t (Performable m))
             => Event t V.Event -> m (Event t ())
 dragNRezize inp = do
+  screenHeightDyn <- displayHeight
   let lText = "¡Hello, Reflex-VTY!"
       minWidth = length lText + 2
       minHeight = 3
@@ -57,12 +59,12 @@ dragNRezize inp = do
         V.EvMouseUp{} -> Just ()
         _ -> Nothing) inp
   rec
-    topDyn         <- foldDyn ($) 5 topUpdate
-    heightDyn      <- foldDyn ($) 5 heightUpdate
-    leftDyn        <- foldDyn ($) 10 leftUpdate
-    widthDyn       <- foldDyn ($) 21 widthUpdate
-    textOffsetXDyn <- foldDyn ($) 0 textOffsetXUpdate
-    textOffsetYDyn <- foldDyn ($) 0 textOffsetYUpdate
+    topDyn          <- foldDyn ($) 5 topUpdate
+    heightDyn       <- foldDyn ($) 5 heightUpdate
+    leftDyn         <- foldDyn ($) 10 leftUpdate
+    widthDyn        <- foldDyn ($) 21 widthUpdate
+    textOffsetXDyn  <- foldDyn ($) 0 textOffsetXUpdate
+    textOffsetYDyn  <- foldDyn ($) 0 textOffsetYUpdate
     let edgeClick = attachPromptlyDynWithMaybe
           (\(((top, h), (w, left)), (tx, ty)) (x, y) ->
             let textRowY = top + 3 + ((h - 3) `div` 2) + ty
@@ -71,10 +73,10 @@ dragNRezize inp = do
             in
               if y == textRowY && x >= textColX && x < textColXEnd
               then Just (Content, x, y, w, h)
-              else if y > top && y < top + 3
+              else if y >= top && y <= top + 4
               then if x == left + w - 3
                    then Just (Header Close, x, y, w, h)
-                   else if x == left + w - 6
+                   else if x >= left + w - 6 && x <= left + w - 4
                    then Just (Header FullScreen, x, y, w, h)
                    else if x == left + w - 9
                    then Just (Header Minimize, x, y, w, h)
@@ -94,24 +96,12 @@ dragNRezize inp = do
               (zipDyn widthDyn leftDyn))
             (zipDyn textOffsetXDyn textOffsetYDyn))
           mouseDownEvent
-    minimizedDyn <- foldDyn ($) False $ leftmost
-      [ const True  <$ minimizeClickEvent
-      , const False <$ fullScreenClickEvent
-      ]
     resizingDyn <- holdDyn Nothing $
       leftmost
         [ Just <$> edgeClick
         , Nothing <$ mouseUpEvent
         ]
-    let minimizeClickEvent = fmapMaybe (\case
-            (Header Minimize, _, _, _, _) -> Just ()
-            _                             -> Nothing)
-          $ fmapMaybe id (updated resizingDyn)
-        fullScreenClickEvent = fmapMaybe (\case
-            (Header FullScreen, _, _, _, _) -> Just ()
-            _                               -> Nothing)
-          $ fmapMaybe id (updated resizingDyn)
-        quitClickEvent = fmapMaybe (\case
+    let quitClickEvent = fmapMaybe (\case
             (Header Close, _, _, _, _) -> Just ()
             _ -> Nothing)
           $ fmapMaybe id (updated resizingDyn)
@@ -137,9 +127,9 @@ dragNRezize inp = do
               _ -> Nothing)
           (current resizingDyn) resizing
         topUpdate = attachWithMaybe
-          (\res (_, y) ->
+          (\(res, screenHeight) (_, y) ->
             case res of
-              Just (TopEdge, _, y0, _, _) ->
+              Just (TopEdge, _, y0, _, _)           ->
                 let delta = y - y0
                 in if delta /= 0
                    then Just (+ delta)
@@ -149,8 +139,13 @@ dragNRezize inp = do
                 in if delta /= 0
                    then Just (+ delta)
                    else Nothing
+              Just (Header Minimize, _, _, _, _)    ->
+                Just (const (screenHeight - 2))
+              Just (Header FullScreen, _, _, _, _)  ->
+                Just (const 5)
               _ -> Nothing)
-          (current resizingDyn) resizing
+          (current $ zipDyn resizingDyn screenHeightDyn)
+          resizing
         widthUpdate = attachWithMaybe
           (\res (x, _) ->
             case res of
@@ -204,14 +199,11 @@ dragNRezize inp = do
               _ -> Nothing)
           (current resizingDyn) resizing
   let drawDyn = zipDynWith
-        (\((top, h, w, left), (tx, ty)) minimized ->
-            drawRect left top w (if minimized then 2 else h) tx ty "Haskell" lText)
-        (zipDyn
-            (zipDynWith (\(top, h) (w, left) -> (top, h, w, left))
-                (zipDyn topDyn heightDyn)
-                (zipDyn widthDyn leftDyn))
-            (zipDyn textOffsetXDyn textOffsetYDyn))
-        minimizedDyn
+        (\(top, h, w, left) (tx, ty) -> drawRect left top w h tx ty "Haskell" lText)
+        (zipDynWith (\(top, h) (w, left) -> (top, h, w, left))
+            (zipDyn topDyn heightDyn)
+            (zipDyn widthDyn leftDyn))
+        (zipDyn textOffsetXDyn textOffsetYDyn)
 
   tellImages $ fmap (:[]) (current drawDyn)
   return quitClickEvent
