@@ -7,11 +7,11 @@ module Main where
 
 import           Control.Monad.Fix (MonadFix)
 import           Data.Maybe        (isJust)
+import           Debug.Trace       (traceShow)
 import qualified Graphics.Vty      as V
 import           Reflex
 import           Reflex.Vty
-import           Reflex.Vty.Widget
-import           Debug.Trace (traceShow)
+import           Reflex.Vty.Widget ()
 
 data ClickAction = TopEdge
                  | BottomEdge
@@ -32,15 +32,13 @@ data ContentAction = DragContent
                    deriving (Eq, Show)
 
 data Dimensions = Dimensions
-  { dimTop      :: Int
-  , dimHeight   :: Int
-  , dimLeft     :: Int
-  , dimWidth    :: Int
-  , offsetX     :: Int
-  , offsetY     :: Int
+  { dimTop    :: Int
+  , dimHeight :: Int
+  , dimLeft   :: Int
+  , dimWidth  :: Int
+  , offsetX   :: Int
+  , offsetY   :: Int
   } deriving (Show, Eq)
-
--- TODO: add functions to implement buttonActions
 
 main :: IO ()
 main = mainWidget $ initManager_ $ do
@@ -72,36 +70,7 @@ dragNRezize inp = do
   rec
     dimensionsDyn <- foldDyn ($) initialDims dimensionsUpdate
     let edgeClick = attachPromptlyDynWithMaybe
-          (\d (x, y) ->
-            let top         = dimTop d
-                h           = dimHeight d
-                w           = dimWidth d
-                left        = dimLeft d
-                tx          = offsetX d
-                ty          = offsetY d
-                textRowY    = top + 3 + ((h - 3) `div` 2) + ty
-                textColX    = left + 1 + ((w - 2 - length lText) `div` 2) + tx
-                textColXEnd = textColX + length lText
-            in -- traceShow ("mouse: ", x, y, "box: ", left, top, w, h) $
-              if y == textRowY && x >= textColX && x < textColXEnd
-              then Just (Content, x, y, w, h)
-              else if y >= top && y <= top + 4
-              then if x == left + w - 3
-                   then Just (Header Close, x, y, w, h)
-                   else if x == left + w - 6
-                   then Just (Header FullScreen, x, y, w, h)
-                   else if x == left + w - 9
-                   then Just (Header Minimize, x, y, w, h)
-                   else Just (Header DragWindow, x, y, w, h)
-              else if y == top && x >= left && x <= left + w
-              then Just (TopEdge, x, y, w, h)
-              else if y == top + h && x >= left && x <= left + w
-              then Just (BottomEdge, x, y, w, h)
-              else if x == left && y >= top && y <= top + h
-              then Just (LeftEdge, x, y, w, h)
-              else if x == left + w && y >= top && y <= top + h
-              then Just (RightEdge, x, y, w, h)
-              else Nothing)
+          (detectClickRegion (length lText))
           dimensionsDyn
           mouseDownEvent
     resizingDyn <- holdDyn Nothing $
@@ -116,57 +85,9 @@ dragNRezize inp = do
         dragging = fmap isJust resizingDyn
         resizing = gate (current dragging) mouseDownEvent
         dimensionsUpdate = attachWithMaybe
-          (\(resM, screenHeight) (x, y) ->
-            case resM of
-              Just (action, x0, y0, w, h) ->
-                let deltaX  = x0 - x
-                    deltaY  = y0 - y
-                    deltaX' = x  - x0
-                    deltaY' = y  - y0
-                in case action of
-                  TopEdge | deltaY' /= 0 ->
-                    Just $ \d -> d
-                    { dimTop    = dimTop d + deltaY'
-                    , dimHeight = max 3 (dimHeight d - deltaY')
-                    }
-                  BottomEdge | deltaY /= 0 ->
-                    Just $ \d -> d
-                      { dimHeight = max 3 (dimHeight d - deltaY)
-                      }
-                  LeftEdge | deltaX' /= 0 ->
-                    Just $ \d -> d
-                      { dimLeft  = dimLeft d + deltaX'
-                      , dimWidth = max minWidth (dimWidth d - deltaX')
-                      }
-                  RightEdge | deltaX /= 0 ->
-                    Just $ \d -> d
-                      { dimWidth = max minWidth (dimWidth d - deltaX)
-                      }
-                  Header DragWindow | deltaX' /= 0 || deltaY' /= 0 ->
-                    Just $ \d -> d
-                      { dimLeft = dimLeft d + deltaX'
-                      , dimTop  = dimTop d + deltaY'
-                      }
-                  Header Minimize ->
-                    Just $ \d -> d
-                      { dimTop    = screenHeight - 2
-                      , dimHeight = 1
-                      }
-                  Header FullScreen ->
-                    Just $ \d -> d
-                      { dimTop    = 5
-                      , dimHeight = 10 
-                      }
-                  Content | deltaX /= 0 || deltaY /= 0 ->
-                    let clampX = absOffset ((w `div` 2) - 2) (2 - (w `div` 2))
-                        clampY = absOffset ((h `div` 2) - 2) (2 - (w `div` 2))
-                    in Just $ \d -> d
-                        { offsetX = clampX (offsetX d + deltaX)
-                        , offsetY = clampY (offsetY d + deltaY)
-                        }
-                  _ -> Nothing
-              Nothing -> Nothing)
-          (current $ zipDyn resizingDyn screenHeightDyn)
+          (\((resM, screenHeight), d) mouse ->
+            updateDimensions d screenHeight resM mouse minHeight minWidth)
+          (current $ zipDyn (zipDyn resizingDyn screenHeightDyn) dimensionsDyn)
           resizing
   let drawDyn = fmap (\d -> drawRect (dimLeft d) (dimTop d) (dimWidth d) (dimHeight d)
                                         (offsetX d) (offsetY d) "Haskell" lText)
@@ -175,8 +96,94 @@ dragNRezize inp = do
   tellImages $ fmap (:[]) (current drawDyn)
   return quitClickEvent
 
+detectClickRegion :: Int -> Dimensions -> (Int, Int)
+                  -> Maybe (ClickAction, Int, Int, Int, Int)
+detectClickRegion textLength d (x, y) =
+  let top         = dimTop    d
+      h           = dimHeight d
+      w           = dimWidth  d
+      left        = dimLeft   d
+      tx          = offsetX   d
+      ty          = offsetY   d
+      textRowY    = top + 3 + ((h - 3) `div` 2) + ty
+      textColX    = left + 1 + ((w - 2 - textLength) `div` 2) + tx
+      textColXEnd = textColX + textLength
+  in -- traceShow ("mouse: ", x, y, "box: ", left, top, w, h) $
+     if y == textRowY && x >= textColX && x < textColXEnd
+     then Just (Content, x, y, w, h)
+     else if y >= top && y <= top + 4
+     then if x == left + w - 3
+           then Just (Header Close, x, y, w, h)
+           else if x == left + w - 6
+           then Just (Header FullScreen, x, y, w, h)
+           else if x == left + w - 9
+           then Just (Header Minimize, x, y, w, h)
+           else Just (Header DragWindow, x, y, w, h)
+     else if y == top && x >= left && x <= left + w
+     then Just (TopEdge, x, y, w, h)
+     else if y == top + h && x >= left && x <= left + w
+     then Just (BottomEdge, x, y, w, h)
+     else if x == left && y >= top && y <= top + h
+     then Just (LeftEdge, x, y, w, h)
+     else if x == left + w && y >= top && y <= top + h
+     then Just (RightEdge, x, y, w, h)
+     else Nothing
+
+updateDimensions :: Dimensions -> Int -> Maybe (ClickAction, Int, Int, Int, Int) -> (Int, Int) -> Int -> Int
+                 -> Maybe (Dimensions -> Dimensions)
+updateDimensions d screenHeight resM (x, y) minHeight minWidth =
+  case resM of
+    Just (action, x0, y0, w, h) ->
+      let deltaX  = x0 - x
+          deltaY  = y0 - y
+          deltaX' = x  - x0
+          deltaY' = y  - y0
+      in case action of
+        TopEdge | deltaY' /= 0 ->
+          Just $ \d -> d
+          { dimTop    = dimTop d + deltaY'
+          , dimHeight = max minHeight (dimHeight d - deltaY')
+          }
+        BottomEdge | deltaY /= 0 ->
+          Just $ \d -> d
+            { dimHeight = max minHeight (dimHeight d - deltaY)
+            }
+        LeftEdge | deltaX' /= 0 ->
+          Just $ \d -> d
+            { dimLeft  = dimLeft d + deltaX'
+            , dimWidth = max minWidth (dimWidth d - deltaX')
+            }
+        RightEdge | deltaX /= 0 ->
+          Just $ \d -> d
+            { dimWidth = max minWidth (dimWidth d - deltaX)
+            }
+        Header DragWindow | deltaX' /= 0 || deltaY' /= 0 ->
+          Just $ \d -> d
+            { dimLeft = dimLeft d + deltaX'
+            , dimTop  = dimTop d + deltaY'
+            }
+        Header Minimize ->
+          Just $ \d -> d
+            { dimTop    = screenHeight - 2
+            , dimHeight = 1
+            }
+        Header FullScreen ->
+          Just $ \d -> d
+            { dimTop    = 5
+            , dimHeight = 10
+            }
+        Content | deltaX' /= 0 || deltaY' /= 0 ->
+          let clampX = absOffset ((w `div` 2) - 2) (2 - (w `div` 2))
+              clampY = absOffset ((h `div` 2) - 2) (2 - (h `div` 2))
+          in Just $ \d -> d
+              { offsetX = clampX (offsetX d + deltaX')
+              , offsetY = clampY (offsetY d + deltaY')
+              }
+        _ -> Nothing
+    Nothing -> Nothing
+
 drawRect :: Int -> Int -> Int -> Int -> Int -> Int -> String -> String -> V.Image
-drawRect x y w h offsetX offsetY titleText contentText
+drawRect x y w h offsetTextX offsetTextY titleText contentText
   | h <= 2 =
       let topBorder    = V.string V.defAttr ("╭" ++ replicate (w - 2) '─' ++ "╮")
           buttonsText    = "▢  X "
@@ -188,7 +195,7 @@ drawRect x y w h offsetX offsetY titleText contentText
           titleRow       = V.string V.defAttr ("│" ++ replicate titlePadding ' ' ++ trimmedTitle
                                               ++ replicate titlePaddingR ' ' ++ buttonsText ++ "│")
       in V.translate x y $ V.vertCat [topBorder, titleRow]
-  | otherwise = 
+  | otherwise =
       let topBorder    = V.string V.defAttr ("╭" ++ replicate (w - 2) '─' ++ "╮")
           emptyRow     = V.string V.defAttr ("│" ++ replicate (w - 2) ' ' ++ "│")
           bottomBorder = V.string V.defAttr ("╰" ++ replicate (w - 2) '─' ++ "╯")
@@ -207,13 +214,13 @@ drawRect x y w h offsetX offsetY titleText contentText
           separatorRow   =
             V.string V.defAttr ("├" ++ replicate (w - 2) '─' ++ "┤")
 
-          contentPaddingLeft  = max 0 (min (w - 2 - length contentText) ((w - 2 - length contentText) `div` 2 + offsetX))
+          contentPaddingLeft  = max 0 (min (w - 2 - length contentText) ((w - 2 - length contentText) `div` 2 + offsetTextX))
           contentPaddingRight = w - 2 - length contentText - contentPaddingLeft
           contentRow          = V.string V.defAttr ("│" ++ replicate contentPaddingLeft ' '
                                                   ++ contentText ++ replicate contentPaddingRight ' ' ++ "│")
 
           contentHeight = h - 4
-          contentPaddingTop = max 0 (min contentHeight ((contentHeight `div` 2) + offsetY))
+          contentPaddingTop = max 0 (min contentHeight ((contentHeight `div` 2) + offsetTextY))
           rowsBefore = replicate contentPaddingTop emptyRow
           rowsAfter = replicate (contentHeight - contentPaddingTop) emptyRow
       in V.translate x y $ V.vertCat ([topBorder, titleRow, separatorRow] ++ rowsBefore ++ [contentRow] ++ rowsAfter ++ [bottomBorder])
