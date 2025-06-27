@@ -11,6 +11,7 @@ import qualified Graphics.Vty      as V
 import           Reflex
 import           Reflex.Vty
 import           Reflex.Vty.Widget
+import           Debug.Trace (traceShow)
 
 data ClickAction = TopEdge
                  | BottomEdge
@@ -29,6 +30,15 @@ data HeaderAction = DragWindow
 data ContentAction = DragContent
                    | String
                    deriving (Eq, Show)
+
+data Dimensions = Dimensions
+  { dimTop      :: Int
+  , dimHeight   :: Int
+  , dimLeft     :: Int
+  , dimWidth    :: Int
+  , offsetX     :: Int
+  , offsetY     :: Int
+  } deriving (Show, Eq)
 
 -- TODO: add functions to implement buttonActions
 
@@ -49,34 +59,36 @@ dragNRezize :: (HasDisplayRegion t m, HasImageWriter t m, HasTheme t m, PerformE
             => Event t V.Event -> m (Event t ())
 dragNRezize inp = do
   screenHeightDyn <- displayHeight
-  let lText = "¡Hello, Reflex-VTY!"
-      minWidth = length lText + 2
-      minHeight = 3
+  let initialDims    = Dimensions 5 5 10 21 0 0
+      lText          = "¡Hello, Reflex-VTY!"
+      minWidth       = length lText + 2
+      minHeight      = 3
       mouseDownEvent = fmapMaybe (\case
         V.EvMouseDown x y _ _ -> Just (x, y)
         _ -> Nothing) inp
-      mouseUpEvent = fmapMaybe (\case
+      mouseUpEvent   = fmapMaybe (\case
         V.EvMouseUp{} -> Just ()
         _ -> Nothing) inp
   rec
-    topDyn          <- foldDyn ($) 5 topUpdate
-    heightDyn       <- foldDyn ($) 5 heightUpdate
-    leftDyn         <- foldDyn ($) 10 leftUpdate
-    widthDyn        <- foldDyn ($) 21 widthUpdate
-    textOffsetXDyn  <- foldDyn ($) 0 textOffsetXUpdate
-    textOffsetYDyn  <- foldDyn ($) 0 textOffsetYUpdate
+    dimensionsDyn <- foldDyn ($) initialDims dimensionsUpdate
     let edgeClick = attachPromptlyDynWithMaybe
-          (\(((top, h), (w, left)), (tx, ty)) (x, y) ->
-            let textRowY = top + 3 + ((h - 3) `div` 2) + ty
-                textColX = left + 1 + ((w - 2 - length lText) `div` 2) + tx
+          (\d (x, y) ->
+            let top         = dimTop d
+                h           = dimHeight d
+                w           = dimWidth d
+                left        = dimLeft d
+                tx          = offsetX d
+                ty          = offsetY d
+                textRowY    = top + 3 + ((h - 3) `div` 2) + ty
+                textColX    = left + 1 + ((w - 2 - length lText) `div` 2) + tx
                 textColXEnd = textColX + length lText
-            in
+            in -- traceShow ("mouse: ", x, y, "box: ", left, top, w, h) $
               if y == textRowY && x >= textColX && x < textColXEnd
               then Just (Content, x, y, w, h)
               else if y >= top && y <= top + 4
               then if x == left + w - 3
                    then Just (Header Close, x, y, w, h)
-                   else if x >= left + w - 6 && x <= left + w - 4
+                   else if x == left + w - 6
                    then Just (Header FullScreen, x, y, w, h)
                    else if x == left + w - 9
                    then Just (Header Minimize, x, y, w, h)
@@ -90,11 +102,7 @@ dragNRezize inp = do
               else if x == left + w && y >= top && y <= top + h
               then Just (RightEdge, x, y, w, h)
               else Nothing)
-          (zipDyn
-            (zipDyn
-              (zipDyn topDyn heightDyn)
-              (zipDyn widthDyn leftDyn))
-            (zipDyn textOffsetXDyn textOffsetYDyn))
+          dimensionsDyn
           mouseDownEvent
     resizingDyn <- holdDyn Nothing $
       leftmost
@@ -107,103 +115,62 @@ dragNRezize inp = do
           $ fmapMaybe id (updated resizingDyn)
         dragging = fmap isJust resizingDyn
         resizing = gate (current dragging) mouseDownEvent
-        heightUpdate = attachWithMaybe
-          (\res (_, y) ->
-            case res of
-              Just (TopEdge, _, y0, _, _) ->
-                let delta = y0 - y
-                in if delta /=0
-                   then Just $ \h ->
-                     let newHeight = h + delta
-                     in max minHeight newHeight
-                   else Nothing
-              Just (BottomEdge, _, y0, _, _) ->
-                let delta = y - y0
-                in if delta /= 0
-                   then Just $ \h ->
-                     let newHeight = h + delta
-                     in max minHeight newHeight
-                   else Nothing
-              _ -> Nothing)
-          (current resizingDyn) resizing
-        topUpdate = attachWithMaybe
-          (\(res, screenHeight) (_, y) ->
-            case res of
-              Just (TopEdge, _, y0, _, _)           ->
-                let delta = y - y0
-                in if delta /= 0
-                   then Just (+ delta)
-                   else Nothing
-              Just (Header DragWindow, _, y0, _, _) ->
-                let delta = y - y0
-                in if delta /= 0
-                   then Just (+ delta)
-                   else Nothing
-              Just (Header Minimize, _, _, _, _)    ->
-                Just (const (screenHeight - 2))
-              Just (Header FullScreen, _, _, _, _)  ->
-                Just (const 5)
-              _ -> Nothing)
+        dimensionsUpdate = attachWithMaybe
+          (\(resM, screenHeight) (x, y) ->
+            case resM of
+              Just (action, x0, y0, w, h) ->
+                let deltaX  = x0 - x
+                    deltaY  = y0 - y
+                    deltaX' = x  - x0
+                    deltaY' = y  - y0
+                in case action of
+                  TopEdge | deltaY' /= 0 ->
+                    Just $ \d -> d
+                    { dimTop    = dimTop d + deltaY'
+                    , dimHeight = max 3 (dimHeight d - deltaY')
+                    }
+                  BottomEdge | deltaY /= 0 ->
+                    Just $ \d -> d
+                      { dimHeight = max 3 (dimHeight d - deltaY)
+                      }
+                  LeftEdge | deltaX' /= 0 ->
+                    Just $ \d -> d
+                      { dimLeft  = dimLeft d + deltaX'
+                      , dimWidth = max minWidth (dimWidth d - deltaX')
+                      }
+                  RightEdge | deltaX /= 0 ->
+                    Just $ \d -> d
+                      { dimWidth = max minWidth (dimWidth d - deltaX)
+                      }
+                  Header DragWindow | deltaX' /= 0 || deltaY' /= 0 ->
+                    Just $ \d -> d
+                      { dimLeft = dimLeft d + deltaX'
+                      , dimTop  = dimTop d + deltaY'
+                      }
+                  Header Minimize ->
+                    Just $ \d -> d
+                      { dimTop    = screenHeight - 2
+                      , dimHeight = 1
+                      }
+                  Header FullScreen ->
+                    Just $ \d -> d
+                      { dimTop    = 5
+                      , dimHeight = 10 
+                      }
+                  Content | deltaX /= 0 || deltaY /= 0 ->
+                    let clampX = absOffset ((w `div` 2) - 2) (2 - (w `div` 2))
+                        clampY = absOffset ((h `div` 2) - 2) (2 - (w `div` 2))
+                    in Just $ \d -> d
+                        { offsetX = clampX (offsetX d + deltaX)
+                        , offsetY = clampY (offsetY d + deltaY)
+                        }
+                  _ -> Nothing
+              Nothing -> Nothing)
           (current $ zipDyn resizingDyn screenHeightDyn)
           resizing
-        widthUpdate = attachWithMaybe
-          (\res (x, _) ->
-            case res of
-              Just (LeftEdge, x0, _, _ , _) ->
-                let delta = x0 - x
-                in if delta /= 0
-                   then Just $ \w -> max minWidth (w + delta)
-                   else Nothing
-              Just (RightEdge, x0, _, _, _) ->
-                let delta = x - x0
-                in if delta /= 0
-                   then Just $ \w -> max minWidth (w + delta)
-                   else Nothing
-              _ -> Nothing)
-          (current resizingDyn) resizing
-        leftUpdate = attachWithMaybe
-          (\res (x, _) ->
-            case res of
-              Just (LeftEdge, x0, _, _, _) ->
-                let delta = x - x0
-                in if delta /= 0
-                   then Just (+ delta)
-                   else Nothing
-              Just (Header DragWindow, x0, _, _, _) ->
-                let delta = x - x0
-                in if delta /= 0
-                   then Just (+ delta)
-                   else Nothing
-              _ -> Nothing)
-          (current resizingDyn) resizing
-        textOffsetXUpdate = attachWithMaybe
-          (\res (x, _) ->
-            case res of
-              Just (Content, x0, _, w, _) ->
-                let delta = x - x0
-                in if delta /= 0
-                  then Just $ \offset ->
-                    absOffset ((w `div` 2) - 2) (2 - (w `div` 2)) (offset + delta)
-                  else Nothing
-              _ -> Nothing)
-          (current resizingDyn) resizing
-        textOffsetYUpdate = attachWithMaybe
-          (\res (_, y) ->
-            case res of
-              Just (Content, _, y0, _, h) ->
-                let delta = y - y0
-                in if delta /= 0
-                  then Just $ \offset ->
-                    absOffset ((h `div` 2) - 2) (2 - (h `div` 2)) (offset + delta)
-                  else Nothing
-              _ -> Nothing)
-          (current resizingDyn) resizing
-  let drawDyn = zipDynWith
-        (\(top, h, w, left) (tx, ty) -> drawRect left top w h tx ty "Haskell" lText)
-        (zipDynWith (\(top, h) (w, left) -> (top, h, w, left))
-            (zipDyn topDyn heightDyn)
-            (zipDyn widthDyn leftDyn))
-        (zipDyn textOffsetXDyn textOffsetYDyn)
+  let drawDyn = fmap (\d -> drawRect (dimLeft d) (dimTop d) (dimWidth d) (dimHeight d)
+                                        (offsetX d) (offsetY d) "Haskell" lText)
+                   dimensionsDyn
 
   tellImages $ fmap (:[]) (current drawDyn)
   return quitClickEvent
