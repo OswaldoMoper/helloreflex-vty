@@ -90,8 +90,7 @@ dragNRezize inp = do
         ]
 
     isFullScreenDyn <- toggle False $
-      fmapMaybe (\case (Header FullScreen, _, _, _, _) -> Just () ; _ -> Nothing) edgeClick
-
+      fmapMaybe (\case (Header FullScreen, _, _, _, _) -> Just (); _ -> Nothing) edgeClick
     let quitClickEvent = fmapMaybe (\case
           (Header Close, _, _, _, _) -> Just ()
           _                          -> Nothing) edgeClick
@@ -100,8 +99,8 @@ dragNRezize inp = do
         resizing = gate (current dragging) mouseDownEvent
         dimensionsUpdate = attachWithMaybe
           (\((resM, (screenHeight, screenWidth)), (isFS, d)) mouse ->
-            updateDimensions d screenWidth screenHeight isFS resM mouse minHeight minWidth)
-          (current $ zipDyn (zipDyn resizingDyn (zipDyn screenWidthDyn screenHeightDyn))
+            updateDimensions d (screenHeight - 1) screenWidth isFS resM mouse minHeight minWidth)
+          (current $ zipDyn (zipDyn resizingDyn (zipDyn screenHeightDyn screenWidthDyn))
                             (zipDyn isFullScreenDyn dimensionsDyn))
           resizing
   let drawDyn = fmap (\d -> drawRect (dimLeft d) (dimTop d) (dimWidth d) (dimHeight d)
@@ -144,6 +143,17 @@ detectClickRegion textLength d (x, y) =
      then Just (RightEdge, x, y, w, h)
      else Nothing
 
+clamp :: Int -> Int -> Int -> Int
+clamp minVal maxVal val = max minVal (min maxVal val)
+
+applyBounds :: Int -> Int -> Int -> Int -> Dimensions -> Dimensions
+applyBounds screenW screenH minW minH d =
+  let w = max minW (min (dimWidth d) (screenW - dimLeft d))
+      h = max minH (min (dimHeight d) (screenH - dimTop d))
+      l = clamp 0 (screenW - w) (dimLeft d)
+      t = clamp 0 (screenH - h) (dimTop d)
+  in d { dimLeft = l, dimTop = t, dimWidth = w, dimHeight = h }
+
 updateDimensions :: Dimensions
                  -> Int -> Int -- ^ Screen height and width
                  -> Bool       -- ^ isFullScreen
@@ -151,51 +161,63 @@ updateDimensions :: Dimensions
                  -> (Int, Int) -- ^ Mouse position (x, y)
                  -> Int -> Int -- ^ Minimum height and width
                  -> Maybe (Dimensions -> Dimensions)
-updateDimensions d screenHeight screenWidth isFS resM (x, y) minHeight minWidth =
-  case resM of
-    Just (Header FullScreen, _, _, _, _) ->
-      Just $ const $
-        if isFS
-        then d
-        else Dimensions 0 0 screenWidth screenHeight 0 0
-    Just (action, x0, y0, w, h) ->
-      let deltaX  = x0 - x
-          deltaY  = y0 - y
-          deltaX' = x  - x0
-          deltaY' = y  - y0
-      in case action of
-        TopEdge | deltaY' /= 0 ->
-          Just $ \d -> d
-          { dimTop    = dimTop d + deltaY'
-          , dimHeight = max minHeight (dimHeight d - deltaY')
-          }
-        BottomEdge | deltaY /= 0 ->
-          Just $ \d -> d
-            { dimHeight = max minHeight (dimHeight d - deltaY)
+updateDimensions d screenHeight screenWidth isFS resM (x, y) minHeight minWidth 
+  | isFS
+  = case resM of
+      Just (Header FullScreen, _, _, _, _) ->
+        Just $ const $
+          if isFS
+          then Dimensions
+            { dimTop    = 0
+            , dimHeight = screenHeight
+            , dimLeft   = 0
+            , dimWidth  = screenWidth
+            , offsetX   = 0
+            , offsetY   = 0
             }
-        LeftEdge | deltaX' /= 0 ->
-          Just $ \d -> d
-            { dimLeft  = dimLeft d + deltaX'
-            , dimWidth = max minWidth (dimWidth d - deltaX')
+          else d
+      _ -> Nothing
+  | otherwise = case resM of
+      Just (_, _, _, _, _) | isFS -> Nothing
+      Just (action, x0, y0, w, h) ->
+        let deltaX  = x0 - x
+            deltaY  = y0 - y
+            deltaX' = x  - x0
+            deltaY' = y  - y0
+            apply = applyBounds screenWidth screenHeight minWidth minHeight
+        in case action of
+          TopEdge | deltaY' /= 0 ->
+            Just $ apply . \d -> d
+            { dimTop    = dimTop d + deltaY'
+            , dimHeight = max minHeight (dimHeight d - deltaY')
             }
-        RightEdge | deltaX /= 0 ->
-          Just $ \d -> d
-            { dimWidth = max minWidth (dimWidth d - deltaX)
-            }
-        Header DragWindow | deltaX' /= 0 || deltaY' /= 0 ->
-          Just $ \d -> d
-            { dimLeft = dimLeft d + deltaX'
-            , dimTop  = dimTop d + deltaY'
-            }
-        Content | deltaX' /= 0 || deltaY' /= 0 ->
-          let clampX = absOffset ((w `div` 2) - 2) (2 - (w `div` 2))
-              clampY = absOffset ((h `div` 2) - 2) (2 - (h `div` 2))
-          in Just $ \d -> d
-              { offsetX = clampX (offsetX d + deltaX')
-              , offsetY = clampY (offsetY d + deltaY')
+          BottomEdge | deltaY /= 0 ->
+            Just $ apply . \d -> d
+              { dimHeight = max minHeight (dimHeight d - deltaY)
               }
-        _ -> Nothing
-    Nothing -> Nothing
+          LeftEdge | deltaX' /= 0 ->
+            Just $ apply . \d -> d
+              { dimLeft  = dimLeft d + deltaX'
+              , dimWidth = max minWidth (dimWidth d - deltaX')
+              }
+          RightEdge | deltaX /= 0 ->
+            Just $ apply . \d -> d
+              { dimWidth = max minWidth (dimWidth d - deltaX)
+              }
+          Header DragWindow | deltaX' /= 0 || deltaY' /= 0 ->
+            Just $ \d -> d
+              { dimLeft = dimLeft d + deltaX'
+              , dimTop  = dimTop d + deltaY'
+              }
+          Content | deltaX' /= 0 || deltaY' /= 0 ->
+            let clampX = absOffset ((w `div` 2) - 2) (2 - (w `div` 2))
+                clampY = absOffset ((h `div` 2) - 2) (2 - (h `div` 2))
+            in Just $ \d -> d
+                { offsetX = clampX (offsetX d + deltaX')
+                , offsetY = clampY (offsetY d + deltaY')
+                }
+          _ -> Nothing
+      Nothing -> Nothing
 
 drawRect :: Int -> Int -> Int -> Int -> Int -> Int -> String -> String -> V.Image
 drawRect x y w h offsetTextX offsetTextY titleText contentText
