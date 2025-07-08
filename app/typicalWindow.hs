@@ -57,6 +57,7 @@ dragNRezize :: (HasDisplayRegion t m, HasImageWriter t m, HasTheme t m, PerformE
             => Event t V.Event -> m (Event t ())
 dragNRezize inp = do
   screenHeightDyn <- displayHeight
+  screenWidthDyn  <- displayWidth
   let initialDims    = Dimensions 5 5 10 21 0 0
       lText          = "¡Hello, Reflex-VTY!"
       minWidth       = length lText + 2
@@ -73,21 +74,35 @@ dragNRezize inp = do
           (detectClickRegion (length lText))
           dimensionsDyn
           mouseDownEvent
+        resizeClick = fmapMaybe
+          (\(action, x, y, w, h) ->
+             case action of
+               Header Close      -> Nothing
+               Header Minimize   -> Nothing
+               Header FullScreen -> Just (Header FullScreen, x, y, w, h)
+               _                 -> Just (action, x, y, w, h))
+          edgeClick
+
     resizingDyn <- holdDyn Nothing $
       leftmost
-        [ Just <$> edgeClick
+        [ Just <$> resizeClick
         , Nothing <$ mouseUpEvent
         ]
+
+    isFullScreenDyn <- toggle False $
+      fmapMaybe (\case (Header FullScreen, _, _, _, _) -> Just () ; _ -> Nothing) edgeClick
+
     let quitClickEvent = fmapMaybe (\case
-            (Header Close, _, _, _, _) -> Just ()
-            _ -> Nothing)
-          $ fmapMaybe id (updated resizingDyn)
-        dragging = fmap isJust resizingDyn
+          (Header Close, _, _, _, _) -> Just ()
+          _                          -> Nothing) edgeClick
+
+    let dragging = fmap isJust resizingDyn
         resizing = gate (current dragging) mouseDownEvent
         dimensionsUpdate = attachWithMaybe
-          (\((resM, screenHeight), d) mouse ->
-            updateDimensions d screenHeight resM mouse minHeight minWidth)
-          (current $ zipDyn (zipDyn resizingDyn screenHeightDyn) dimensionsDyn)
+          (\((resM, (screenHeight, screenWidth)), (isFS, d)) mouse ->
+            updateDimensions d screenWidth screenHeight isFS resM mouse minHeight minWidth)
+          (current $ zipDyn (zipDyn resizingDyn (zipDyn screenWidthDyn screenHeightDyn))
+                            (zipDyn isFullScreenDyn dimensionsDyn))
           resizing
   let drawDyn = fmap (\d -> drawRect (dimLeft d) (dimTop d) (dimWidth d) (dimHeight d)
                                         (offsetX d) (offsetY d) "Haskell" lText)
@@ -111,7 +126,7 @@ detectClickRegion textLength d (x, y) =
   in -- traceShow ("mouse: ", x, y, "box: ", left, top, w, h) $
      if y == textRowY && x >= textColX && x < textColXEnd
      then Just (Content, x, y, w, h)
-     else if y >= top && y <= top + 4
+     else if y > top && y < top + 2
      then if x == left + w - 3
            then Just (Header Close, x, y, w, h)
            else if x == left + w - 6
@@ -129,10 +144,20 @@ detectClickRegion textLength d (x, y) =
      then Just (RightEdge, x, y, w, h)
      else Nothing
 
-updateDimensions :: Dimensions -> Int -> Maybe (ClickAction, Int, Int, Int, Int) -> (Int, Int) -> Int -> Int
+updateDimensions :: Dimensions
+                 -> Int -> Int -- ^ Screen height and width
+                 -> Bool       -- ^ isFullScreen
+                 -> Maybe (ClickAction, Int, Int, Int, Int)
+                 -> (Int, Int) -- ^ Mouse position (x, y)
+                 -> Int -> Int -- ^ Minimum height and width
                  -> Maybe (Dimensions -> Dimensions)
-updateDimensions d screenHeight resM (x, y) minHeight minWidth =
+updateDimensions d screenHeight screenWidth isFS resM (x, y) minHeight minWidth =
   case resM of
+    Just (Header FullScreen, _, _, _, _) ->
+      Just $ const $
+        if isFS
+        then d
+        else Dimensions 0 0 screenWidth screenHeight 0 0
     Just (action, x0, y0, w, h) ->
       let deltaX  = x0 - x
           deltaY  = y0 - y
@@ -161,16 +186,6 @@ updateDimensions d screenHeight resM (x, y) minHeight minWidth =
           Just $ \d -> d
             { dimLeft = dimLeft d + deltaX'
             , dimTop  = dimTop d + deltaY'
-            }
-        Header Minimize ->
-          Just $ \d -> d
-            { dimTop    = screenHeight - 2
-            , dimHeight = 1
-            }
-        Header FullScreen ->
-          Just $ \d -> d
-            { dimTop    = 5
-            , dimHeight = 10
             }
         Content | deltaX' /= 0 || deltaY' /= 0 ->
           let clampX = absOffset ((w `div` 2) - 2) (2 - (w `div` 2))

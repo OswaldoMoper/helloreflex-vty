@@ -5,14 +5,14 @@
 
 module Main where
 
-import Control.Monad.Fix (MonadFix)
-import qualified Graphics.Vty as V
+import           Control.Monad.Fix (MonadFix)
+import           Data.Maybe        (isJust)
+import qualified Graphics.Vty      as V
 import           Reflex
 import           Reflex.Vty
-import           Data.Maybe (isJust)
 
-data ResizeOrDrag = TopEdge 
-                  | BottomEdge 
+data ResizeOrDrag = TopEdge
+                  | BottomEdge
                   | LeftEdge
                   | RightEdge
                   | OnText
@@ -58,7 +58,7 @@ dragNRezize inp = do
               then Just (OnText, x, y, w, h)
               else if x > left + 1 && x < left + w - 1 && y > top + 1 && y < top + h - 1
               then Just (Inside, x, y, w, h)
-              else if y == top && x >= left && x <= left + w 
+              else if y == top && x >= left && x <= left + w
               then Just (TopEdge, x, y, w, h)
               else if y == top + h && x >= left && x <= left + w
               then Just (BottomEdge, x, y, w, h)
@@ -76,7 +76,7 @@ dragNRezize inp = do
     resizingDyn <- holdDyn Nothing $
       leftmost
         [ Just <$> edgeClick
-        , Nothing <$ mouseUpEvent 
+        , Nothing <$ mouseUpEvent
         ]
     let dragging = fmap isJust resizingDyn
         resizing = gate (current dragging) mouseDownEvent
@@ -150,7 +150,7 @@ dragNRezize inp = do
               Just (OnText, x0, _, w, _) ->
                 let delta = x - x0
                 in if delta /= 0
-                  then Just $ \offset -> 
+                  then Just $ \offset ->
                     absOffset ((w `div` 2) - 2) (2 - (w `div` 2)) (offset + delta)
                   else Nothing
               _ -> Nothing)
@@ -162,7 +162,7 @@ dragNRezize inp = do
                 let delta = y - y0
                 in if delta /= 0
                   then Just $ \offset ->
-                    absOffset ((h `div` 2) - 2) (2 - (h `div` 2)) (offset + delta) 
+                    absOffset ((h `div` 2) - 2) (2 - (h `div` 2)) (offset + delta)
                   else Nothing
               _ -> Nothing)
           (current resizingDyn) resizing

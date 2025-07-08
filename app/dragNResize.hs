@@ -5,14 +5,14 @@
 
 module Main where
 
-import Control.Monad.Fix (MonadFix)
-import qualified Graphics.Vty as V
+import           Control.Monad.Fix (MonadFix)
+import           Data.Maybe        (isJust)
+import qualified Graphics.Vty      as V
 import           Reflex
 import           Reflex.Vty
-import           Data.Maybe (isJust)
 
-data ResizeOrDrag = TopEdge 
-                  | BottomEdge 
+data ResizeOrDrag = TopEdge
+                  | BottomEdge
                   | LeftEdge
                   | RightEdge
                   | Inside
@@ -47,7 +47,7 @@ dragNRezize inp = do
     widthDyn  <- foldDyn ($) 21 widthUpdate
     let edgeClick = attachPromptlyDynWithMaybe
           (\(top, h, w, left) (x, y) ->
-            if y == top && x >= left && x <= left + w 
+            if y == top && x >= left && x <= left + w
             then Just (TopEdge, x, y)
             else if y == top + h && x >= left && x <= left + w
             then Just (BottomEdge, x, y)
@@ -63,7 +63,7 @@ dragNRezize inp = do
     resizingDyn <- holdDyn Nothing $
       leftmost
         [ Just <$> edgeClick
-        , Nothing <$ mouseUpEvent 
+        , Nothing <$ mouseUpEvent
         ]
     let dragging = fmap isJust resizingDyn
         resizing = gate (current dragging) mouseDownEvent
