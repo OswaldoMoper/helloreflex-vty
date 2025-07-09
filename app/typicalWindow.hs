@@ -72,33 +72,24 @@ dragNRezize inp = do
     dimensionsDyn <- foldDyn ($) initialDims dimensionsUpdate
     prevDimsDyn <- holdDyn initialDims $
       attachPromptlyDynWithMaybe
-        (\becameFullScreen d ->
-          if not becameFullScreen
+        (\mode d ->
+          if mode /= "FullScreen" && mode /= "Minimized"
           then Just d
           else Nothing)
-        isFullScreenDyn
+        modeDyn
         (updated dimensionsDyn)
     let edgeClick = attachPromptlyDynWithMaybe
           (detectClickRegion (length lText))
           dimensionsDyn
           mouseDownEvent
-        resizeClick = fmapMaybe
-          (\(action, x, y, w, h) ->
-             case action of
-               Header Close      -> Nothing
-               Header Minimize   -> Nothing
-               Header FullScreen -> Just (Header FullScreen, x, y, w, h)
-               _                 -> Just (action, x, y, w, h))
-          edgeClick
 
     resizingDyn <- holdDyn Nothing $
       leftmost
-        [ Just <$> resizeClick
+        [ Just <$> edgeClick
         , Nothing <$ mouseUpEvent
         ]
 
-    isFullScreenDyn <- toggle False $
-      fmapMaybe (\case (Header FullScreen, _, _, _, _) -> Just (); _ -> Nothing) edgeClick
+    modeDyn <- foldDyn updateMode "Windowed" edgeClick
     let quitClickEvent = fmapMaybe (\case
           (Header Close, _, _, _, _) -> Just ()
           _                          -> Nothing) edgeClick
@@ -109,14 +100,21 @@ dragNRezize inp = do
           (\((resM, (screenHeight, screenWidth)), (isFS, (d, prevD))) mouse ->
             updateDimensions d prevD (screenHeight - 1) screenWidth isFS resM mouse minHeight minWidth)
           (current $ zipDyn (zipDyn resizingDyn (zipDyn screenHeightDyn screenWidthDyn))
-                            (zipDyn isFullScreenDyn (zipDyn dimensionsDyn prevDimsDyn)))
+                            (zipDyn modeDyn (zipDyn dimensionsDyn prevDimsDyn)))
           resizing
   let drawDyn = fmap (\(d, isFS) -> drawRect (dimLeft d) (dimTop d) (dimWidth d) (dimHeight d)
                                         (offsetX d) (offsetY d) "Haskell" lText isFS)
-                   (zipDyn dimensionsDyn isFullScreenDyn)
+                   (zipDyn dimensionsDyn modeDyn)
 
   tellImages $ fmap (:[]) (current drawDyn)
   return quitClickEvent
+
+updateMode :: (ClickAction, Int, Int, Int, Int) -> String -> String
+updateMode (Header FullScreen, _, _, _, _) "FullScreen" = "Windowed"
+updateMode (Header FullScreen, _, _, _, _) _            = "FullScreen"
+updateMode (Header Minimize,   _, _, _, _) _            = "Minimized"
+updateMode (Header DragWindow, _, _, _, _) "Minimized"  = "Windowed"
+updateMode _                               m            = m
 
 detectClickRegion :: Int -> Dimensions -> (Int, Int)
                   -> Maybe (ClickAction, Int, Int, Int, Int)
@@ -165,13 +163,13 @@ applyBounds screenW screenH minW minH d =
 updateDimensions :: Dimensions -- ^ Current dimensions
                  -> Dimensions -- ^ prevFullScreen Dimensions
                  -> Int -> Int -- ^ Screen height and width
-                 -> Bool       -- ^ isFullScreen
+                 -> String     -- ^ isFullScreen, Windowed or Minimized
                  -> Maybe (ClickAction, Int, Int, Int, Int)
                  -> (Int, Int) -- ^ Mouse position (x, y)
                  -> Int -> Int -- ^ Minimum height and width
                  -> Maybe (Dimensions -> Dimensions)
-updateDimensions d prevFullScreen screenHeight screenWidth isFS resM (x, y) minHeight minWidth
-  | isFS
+updateDimensions d prevFullScreen screenHeight screenWidth isMode resM (x, y) minHeight minWidth
+  | isMode == "FullScreen"
   = case resM of
       Just (Header FullScreen, _, _, _, _) ->
         Just $ const Dimensions
@@ -182,33 +180,51 @@ updateDimensions d prevFullScreen screenHeight screenWidth isFS resM (x, y) minH
           , offsetX   = 0
           , offsetY   = 0
           }
+      Just (Header Minimize, _, _, _, _) ->
+        Just $ const prevFullScreen
+      _ -> Nothing
+  | isMode == "Minimized"
+  = case resM of
+      Just (Header Minimize, _, _, _, _) ->
+        Just $ const Dimensions
+          { dimTop    = screenHeight - 2
+          , dimHeight = 2
+          , dimLeft   = 0
+          , dimWidth  = minWidth
+          , offsetX   = 0
+          , offsetY   = 0
+          }
+      Just (Header DragWindow, _, _, _, _) ->
+        Just $ const prevFullScreen
       _ -> Nothing
   | otherwise = case resM of
       Just (Header FullScreen, _, _, _, _) ->
+        Just $ const prevFullScreen
+      Just (Header Minimize, _, _, _, _) ->
         Just $ const prevFullScreen
       Just (action, x0, y0, w, h) ->
         let deltaX  = x0 - x
             deltaY  = y0 - y
             deltaX' = x  - x0
             deltaY' = y  - y0
-            apply = applyBounds screenWidth screenHeight minWidth minHeight
+            applyB  = applyBounds screenWidth screenHeight minWidth minHeight
         in case action of
           TopEdge | deltaY' /= 0 ->
-            Just $ apply . \d -> d
+            Just $ applyB . \d -> d
             { dimTop    = dimTop d + deltaY'
             , dimHeight = max minHeight (dimHeight d - deltaY')
             }
           BottomEdge | deltaY /= 0 ->
-            Just $ apply . \d -> d
+            Just $ applyB . \d -> d
               { dimHeight = max minHeight (dimHeight d - deltaY)
               }
           LeftEdge | deltaX' /= 0 ->
-            Just $ apply . \d -> d
+            Just $ applyB . \d -> d
               { dimLeft  = dimLeft d + deltaX'
               , dimWidth = max minWidth (dimWidth d - deltaX')
               }
           RightEdge | deltaX /= 0 ->
-            Just $ apply . \d -> d
+            Just $ applyB . \d -> d
               { dimWidth = max minWidth (dimWidth d - deltaX)
               }
           Header DragWindow | deltaX' /= 0 || deltaY' /= 0 ->
@@ -226,11 +242,11 @@ updateDimensions d prevFullScreen screenHeight screenWidth isFS resM (x, y) minH
           _ -> Nothing
       Nothing -> Nothing
 
-drawRect :: Int -> Int -> Int -> Int -> Int -> Int -> String -> String -> Bool -> V.Image
-drawRect x y w h offsetTextX offsetTextY titleText contentText isFS
+drawRect :: Int -> Int -> Int -> Int -> Int -> Int -> String -> String -> String -> V.Image
+drawRect x y w h offsetTextX offsetTextY titleText contentText modeWindow
   | h <= 2 =
       let topBorder    = V.string V.defAttr ("╭" ++ replicate (w - 2) '─' ++ "╮")
-          buttonsText    = "▢  X "
+          buttonsText    = "  ▢  X "
           availableWidth = w - 2
           maxTitleLen    = availableWidth - length buttonsText
           trimmedTitle   = take maxTitleLen titleText
@@ -244,7 +260,7 @@ drawRect x y w h offsetTextX offsetTextY titleText contentText isFS
           emptyRow     = V.string V.defAttr ("│" ++ replicate (w - 2) ' ' ++ "│")
           bottomBorder = V.string V.defAttr ("╰" ++ replicate (w - 2) '─' ++ "╯")
 
-          buttonsText    = if isFS
+          buttonsText    = if modeWindow == "FullScreen"
                            then "  -  🗗  X "
                            else "  -  ▢  X "
           availableWidth = w - 2
