@@ -70,6 +70,14 @@ dragNRezize inp = do
         _ -> Nothing) inp
   rec
     dimensionsDyn <- foldDyn ($) initialDims dimensionsUpdate
+    prevDimsDyn <- holdDyn initialDims $
+      attachPromptlyDynWithMaybe
+        (\becameFullScreen d ->
+          if not becameFullScreen
+          then Just d
+          else Nothing)
+        isFullScreenDyn
+        (updated dimensionsDyn)
     let edgeClick = attachPromptlyDynWithMaybe
           (detectClickRegion (length lText))
           dimensionsDyn
@@ -98,14 +106,14 @@ dragNRezize inp = do
     let dragging = fmap isJust resizingDyn
         resizing = gate (current dragging) mouseDownEvent
         dimensionsUpdate = attachWithMaybe
-          (\((resM, (screenHeight, screenWidth)), (isFS, d)) mouse ->
-            updateDimensions d (screenHeight - 1) screenWidth isFS resM mouse minHeight minWidth)
+          (\((resM, (screenHeight, screenWidth)), (isFS, (d, prevD))) mouse ->
+            updateDimensions d prevD (screenHeight - 1) screenWidth isFS resM mouse minHeight minWidth)
           (current $ zipDyn (zipDyn resizingDyn (zipDyn screenHeightDyn screenWidthDyn))
-                            (zipDyn isFullScreenDyn dimensionsDyn))
+                            (zipDyn isFullScreenDyn (zipDyn dimensionsDyn prevDimsDyn)))
           resizing
-  let drawDyn = fmap (\d -> drawRect (dimLeft d) (dimTop d) (dimWidth d) (dimHeight d)
-                                        (offsetX d) (offsetY d) "Haskell" lText)
-                   dimensionsDyn
+  let drawDyn = fmap (\(d, isFS) -> drawRect (dimLeft d) (dimTop d) (dimWidth d) (dimHeight d)
+                                        (offsetX d) (offsetY d) "Haskell" lText isFS)
+                   (zipDyn dimensionsDyn isFullScreenDyn)
 
   tellImages $ fmap (:[]) (current drawDyn)
   return quitClickEvent
@@ -154,31 +162,30 @@ applyBounds screenW screenH minW minH d =
       t = clamp 0 (screenH - h) (dimTop d)
   in d { dimLeft = l, dimTop = t, dimWidth = w, dimHeight = h }
 
-updateDimensions :: Dimensions
+updateDimensions :: Dimensions -- ^ Current dimensions
+                 -> Dimensions -- ^ prevFullScreen Dimensions
                  -> Int -> Int -- ^ Screen height and width
                  -> Bool       -- ^ isFullScreen
                  -> Maybe (ClickAction, Int, Int, Int, Int)
                  -> (Int, Int) -- ^ Mouse position (x, y)
                  -> Int -> Int -- ^ Minimum height and width
                  -> Maybe (Dimensions -> Dimensions)
-updateDimensions d screenHeight screenWidth isFS resM (x, y) minHeight minWidth 
+updateDimensions d prevFullScreen screenHeight screenWidth isFS resM (x, y) minHeight minWidth
   | isFS
   = case resM of
       Just (Header FullScreen, _, _, _, _) ->
-        Just $ const $
-          if isFS
-          then Dimensions
-            { dimTop    = 0
-            , dimHeight = screenHeight
-            , dimLeft   = 0
-            , dimWidth  = screenWidth
-            , offsetX   = 0
-            , offsetY   = 0
-            }
-          else d
+        Just $ const Dimensions
+          { dimTop    = 0
+          , dimHeight = screenHeight
+          , dimLeft   = 0
+          , dimWidth  = screenWidth
+          , offsetX   = 0
+          , offsetY   = 0
+          }
       _ -> Nothing
   | otherwise = case resM of
-      Just (_, _, _, _, _) | isFS -> Nothing
+      Just (Header FullScreen, _, _, _, _) ->
+        Just $ const prevFullScreen
       Just (action, x0, y0, w, h) ->
         let deltaX  = x0 - x
             deltaY  = y0 - y
@@ -219,8 +226,8 @@ updateDimensions d screenHeight screenWidth isFS resM (x, y) minHeight minWidth
           _ -> Nothing
       Nothing -> Nothing
 
-drawRect :: Int -> Int -> Int -> Int -> Int -> Int -> String -> String -> V.Image
-drawRect x y w h offsetTextX offsetTextY titleText contentText
+drawRect :: Int -> Int -> Int -> Int -> Int -> Int -> String -> String -> Bool -> V.Image
+drawRect x y w h offsetTextX offsetTextY titleText contentText isFS
   | h <= 2 =
       let topBorder    = V.string V.defAttr ("╭" ++ replicate (w - 2) '─' ++ "╮")
           buttonsText    = "▢  X "
@@ -237,7 +244,9 @@ drawRect x y w h offsetTextX offsetTextY titleText contentText
           emptyRow     = V.string V.defAttr ("│" ++ replicate (w - 2) ' ' ++ "│")
           bottomBorder = V.string V.defAttr ("╰" ++ replicate (w - 2) '─' ++ "╯")
 
-          buttonsText    = "  -  ▢  X "
+          buttonsText    = if isFS
+                           then "  -  🗗  X "
+                           else "  -  ▢  X "
           availableWidth = w - 2
           maxTitleLen    = availableWidth - length buttonsText
           trimmedTitle   = take maxTitleLen titleText
