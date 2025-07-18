@@ -69,12 +69,23 @@ dragNRezize inp = do
 
   (dimensionsDyn, modeDyn, quitClickEvent) <- handleWindowEvent inp lText minWidth minHeight initialDims
 
-  let drawDyn = fmap (\(d, isFS) -> drawRect (dimLeft d) (dimTop d) (dimWidth d) (dimHeight d)
-                                        (offsetX d) (offsetY d) "Haskell" lText isFS)
-                   (zipDyn dimensionsDyn modeDyn)
+  drawDyn <- buildWindowDyn dimensionsDyn modeDyn "Haskell" lText
 
   tellImages $ fmap (:[]) (current drawDyn)
   return quitClickEvent
+
+buildWindowDyn :: ( Reflex t, MonadHold t m )
+               => Dynamic t Dimensions
+               -> Dynamic t String
+               -> String -- ^ Title
+               -> String -- ^ Content
+               -> m (Dynamic t V.Image)
+buildWindowDyn dimensionsDyn modeDyn title content =
+  pure $ zipDynWith (\d mode ->
+    drawRect (dimLeft d) (dimTop d) (dimWidth d) (dimHeight d)
+             (offsetX d) (offsetY d) title content mode)
+    dimensionsDyn
+    modeDyn
 
 handleWindowEvent :: ( Reflex t, PerformEvent t m, MonadHold t m, MonadFix m, TriggerEvent t m, MonadSample t (Performable m)
                      , HasDisplayRegion t m
