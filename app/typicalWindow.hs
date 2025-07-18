@@ -56,8 +56,6 @@ main = mainWidget $ initManager_ $ do
 dragNRezize :: (HasDisplayRegion t m, HasImageWriter t m, HasTheme t m, PerformEvent t m, MonadHold t m, TriggerEvent t m, MonadFix m, MonadSample t (Performable m))
             => Event t V.Event -> m (Event t ())
 dragNRezize inp = do
-  screenHeightDyn <- displayHeight
-  screenWidthDyn  <- displayWidth
   let initialDims    = Dimensions 5 5 10 21 0 0
       lText          = "¡Hello, Reflex-VTY!"
       minWidth       = length lText + 2
@@ -68,46 +66,65 @@ dragNRezize inp = do
       mouseUpEvent   = fmapMaybe (\case
         V.EvMouseUp{} -> Just ()
         _ -> Nothing) inp
-  rec
-    dimensionsDyn <- foldDyn ($) initialDims dimensionsUpdate
-    prevDimsDyn <- holdDyn initialDims $
-      attachPromptlyDynWithMaybe
-        (\mode d ->
-          if mode /= "FullScreen" && mode /= "Minimized"
-          then Just d
-          else Nothing)
-        modeDyn
-        (updated dimensionsDyn)
-    let edgeClick = attachPromptlyDynWithMaybe
-          (detectClickRegion (length lText))
-          dimensionsDyn
-          mouseDownEvent
 
-    resizingDyn <- holdDyn Nothing $
-      leftmost
-        [ Just <$> edgeClick
-        , Nothing <$ mouseUpEvent
-        ]
+  (dimensionsDyn, modeDyn, quitClickEvent) <- handleWindowEvent inp lText minWidth minHeight initialDims
 
-    modeDyn <- foldDyn updateMode "Windowed" edgeClick
-    let quitClickEvent = fmapMaybe (\case
-          (Header Close, _, _, _, _) -> Just ()
-          _                          -> Nothing) edgeClick
-
-    let dragging = fmap isJust resizingDyn
-        resizing = gate (current dragging) mouseDownEvent
-        dimensionsUpdate = attachWithMaybe
-          (\((resM, (screenHeight, screenWidth)), (isFS, (d, prevD))) mouse ->
-            updateDimensions d prevD (screenHeight - 1) screenWidth isFS resM mouse minHeight minWidth)
-          (current $ zipDyn (zipDyn resizingDyn (zipDyn screenHeightDyn screenWidthDyn))
-                            (zipDyn modeDyn (zipDyn dimensionsDyn prevDimsDyn)))
-          resizing
   let drawDyn = fmap (\(d, isFS) -> drawRect (dimLeft d) (dimTop d) (dimWidth d) (dimHeight d)
                                         (offsetX d) (offsetY d) "Haskell" lText isFS)
                    (zipDyn dimensionsDyn modeDyn)
 
   tellImages $ fmap (:[]) (current drawDyn)
   return quitClickEvent
+
+handleWindowEvent :: ( Reflex t, PerformEvent t m, MonadHold t m, MonadFix m, TriggerEvent t m, MonadSample t (Performable m)
+                     , HasDisplayRegion t m
+                     )
+                  => Event t V.Event
+                  -> String -- ^ Central text
+                  -> Int -- ^ minWidth
+                  -> Int -- ^ minHeight
+                  -> Dimensions
+                  -> m (Dynamic t Dimensions, Dynamic t String, Event t ())
+handleWindowEvent inp lText minWidth minHeight initialDims = mdo
+  screenHeightDyn <- displayHeight
+  screenWidthDyn  <- displayWidth
+  mouseDownEvent <- pure $ fmapMaybe (\case
+    V.EvMouseDown x y _ _ -> Just (x, y)
+    _ -> Nothing) inp
+  mouseUpEvent   <- pure $ fmapMaybe (\case
+    V.EvMouseUp{} -> Just ()
+    _ -> Nothing) inp
+  dimensionsDyn <- foldDyn ($) initialDims dimensionsUpdate
+  prevDimsDyn <- holdDyn initialDims $
+    attachPromptlyDynWithMaybe
+      (\mode d ->
+        if mode /= "FullScreen" && mode /= "Minimized"
+        then Just d
+        else Nothing)
+      modeDyn
+      (updated dimensionsDyn)
+  let edgeClick = attachPromptlyDynWithMaybe
+        (detectClickRegion (length lText))
+        dimensionsDyn
+        mouseDownEvent
+  resizingDyn <- holdDyn Nothing $
+    leftmost
+      [ Just <$> edgeClick
+      , Nothing <$ mouseUpEvent
+      ]
+  modeDyn <- foldDyn updateMode "Windowed" edgeClick
+  let quitClickEvent = fmapMaybe (\case
+        (Header Close, _, _, _, _) -> Just ()
+        _                          -> Nothing) edgeClick
+      dragging = fmap isJust resizingDyn
+      resizing = gate (current dragging) mouseDownEvent
+      dimensionsUpdate = attachWithMaybe
+        (\((resM, (screenHeight, screenWidth)), (isFS, (d, prevD))) mouse ->
+          updateDimensions d prevD (screenHeight - 1) screenWidth isFS resM mouse minHeight minWidth)
+        (current $ zipDyn (zipDyn resizingDyn (zipDyn screenHeightDyn screenWidthDyn))
+                          (zipDyn modeDyn (zipDyn dimensionsDyn prevDimsDyn)))
+        resizing
+  return (dimensionsDyn, modeDyn, quitClickEvent)
 
 updateMode :: (ClickAction, Int, Int, Int, Int) -> String -> String
 updateMode (Header FullScreen, _, _, _, _) "FullScreen" = "Windowed"
