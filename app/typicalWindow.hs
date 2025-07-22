@@ -13,10 +13,8 @@ import           Reflex
 import           Reflex.Vty
 import           Reflex.Vty.Widget ()
 
-data ClickAction = TopEdge
-                 | BottomEdge
-                 | LeftEdge
-                 | RightEdge
+data ClickAction = TopEdge | BottomEdge | LeftEdge | RightEdge
+                 | TopLeft | TopRight | BottomLeft | BottomRight
                  | Content
                  | Header HeaderAction
                  deriving (Eq)
@@ -157,7 +155,15 @@ detectClickRegion textLength d (x, y) =
       textColX    = left + 1 + ((w - 2 - textLength) `div` 2) + tx
       textColXEnd = textColX + textLength
   in -- traceShow ("mouse: ", x, y, "box: ", left, top, w, h) $
-     if y == textRowY && x >= textColX && x < textColXEnd
+     if x == left && y == top
+     then Just (TopLeft, x, y, w, h)
+     else if x == left + w && y == top
+     then Just (TopRight, x, y, w, h)
+     else if x == left && y == top + h
+     then Just (BottomLeft, x, y, w, h)
+     else if x == left + w && y == top + h
+     then Just (BottomRight, x, y, w, h)
+     else if y == textRowY && x >= textColX && x < textColXEnd
      then Just (Content, x, y, w, h)
      else if y > top && y < top + 2
      then if x == left + w - 3
@@ -237,6 +243,30 @@ updateDimensions d prevFullScreen screenHeight screenWidth isMode resM (x, y) mi
             deltaY' = y  - y0
             applyB  = applyBounds screenWidth screenHeight minWidth minHeight
         in case action of
+          TopLeft | deltaX' /= 0 || deltaY' /= 0 ->
+            Just $ applyB . \d -> d
+              { dimLeft  = dimLeft d + deltaX'
+              , dimTop   = dimTop d + deltaY'
+              , dimWidth = max minWidth (dimWidth d - deltaX')
+              , dimHeight = max minHeight (dimHeight d - deltaY')
+              }
+          TopRight | deltaX' /= 0 || deltaY' /= 0 ->
+            Just $ applyB . \d -> d
+              { dimTop    = dimTop d - deltaY
+              , dimWidth  = max minWidth (dimWidth d - deltaX)
+              , dimHeight = max minHeight (dimHeight d - deltaY')
+              }
+          BottomLeft | deltaX' /= 0 || deltaY' /= 0 ->
+            Just $ applyB . \d -> d
+              { dimLeft   = dimLeft d + deltaX'
+              , dimWidth  = max minWidth (dimWidth d - deltaX')
+              , dimHeight = max minHeight (dimHeight d - deltaY)
+              }
+          BottomRight | deltaX' /= 0 || deltaY' /= 0 ->
+            Just $ applyB . \d -> d
+              { dimWidth  = max minWidth (dimWidth d - deltaX)
+              , dimHeight = max minHeight (dimHeight d - deltaY)
+              }
           TopEdge | deltaY' /= 0 ->
             Just $ applyB . \d -> d
             { dimTop    = dimTop d + deltaY'
