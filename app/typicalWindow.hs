@@ -200,7 +200,7 @@ updateDimensions d prevFullScreen screenHeight screenWidth resM (x, y) minHeight
         , dimWidth  = minWidth
         , offsetX   = 0
         , offsetY   = 0
-        , windowMode = "Windowed"
+        , windowMode = "Minimized"
         }
       fullDims = Dimensions
         { dimTop    = 0
@@ -234,7 +234,7 @@ updateDimensions d prevFullScreen screenHeight screenWidth resM (x, y) minHeight
       "Minimized" -> case resM of
         Just (Header FullScreen, _, _, _, _) ->
           Just $ const fullDims
-        Just (Header DragWindow, _, _, _, _) ->
+        Just _ ->
           Just $ const prevFullScreen
         _ -> Nothing
     else case resM of
@@ -307,48 +307,61 @@ updateDimensions d prevFullScreen screenHeight screenWidth resM (x, y) minHeight
 
 drawRect :: Int -> Int -> Int -> Int -> Int -> Int -> String -> String -> String -> V.Image
 drawRect x y w h offsetTextX offsetTextY titleText contentText modeWindow
-  | h <= 2 =
-      let topBorder    = V.string V.defAttr ("╭" ++ replicate (w - 2) '─' ++ "╮")
-          buttonsText    = "  ▢  X "
-          availableWidth = w - 2
-          maxTitleLen    = availableWidth - length buttonsText
-          trimmedTitle   = take maxTitleLen titleText
-          titlePadding   = max 0 (availableWidth - length trimmedTitle - length buttonsText) `div` 2
-          titlePaddingR  = w - 2 - titlePadding - length buttonsText - length trimmedTitle
-          titleRow       = V.string V.defAttr ("│" ++ replicate titlePadding ' ' ++ trimmedTitle
-                                              ++ replicate titlePaddingR ' ' ++ buttonsText ++ "│")
-      in V.translate x y $ V.vertCat [topBorder, titleRow]
-  | otherwise =
-      let topBorder    = V.string V.defAttr ("╭" ++ replicate (w - 2) '─' ++ "╮")
-          emptyRow     = V.string V.defAttr ("│" ++ replicate (w - 2) ' ' ++ "│")
-          bottomBorder = V.string V.defAttr ("╰" ++ replicate (w - 2) '─' ++ "╯")
+  | modeWindow == "Minimized" = V.translate x y $ V.vertCat
+      [ drawTopBorder w
+      , drawTitleRow w titleText modeWindow ""
+      ]
+  | otherwise = V.translate x y $ V.vertCat $
+      [ drawTopBorder w
+      , drawTitleRow w titleText modeWindow contentText
+      , drawSeparatorRow w
+      ]
+      ++ drawContentArea w h contentText offsetTextX offsetTextY
+      ++ [drawBottomBorder w]
 
-          buttonsText    = if modeWindow == "FullScreen"
-                           then "  -  🗗  X "
-                           else "  -  ▢  X "
-          availableWidth = w - 2
-          maxTitleLen    = availableWidth - length buttonsText
-          trimmedTitle   = take maxTitleLen titleText
-          titlePadding   = max 0 (availableWidth - length trimmedTitle) `div` 2
-          centerTitle    | length buttonsText > titlePadding = titlePadding - length buttonsText
-                        | otherwise                         = 0
-          titlePaddingR  = w - 2 - titlePadding - length buttonsText - length trimmedTitle - centerTitle
-          titleRow       = V.string V.defAttr ("│" ++ replicate (titlePadding + centerTitle) ' '
-                                              ++ trimmedTitle ++ replicate titlePaddingR ' '
-                                              ++ buttonsText ++ "│")
-          separatorRow   =
-            V.string V.defAttr ("├" ++ replicate (w - 2) '─' ++ "┤")
+drawTopBorder :: Int -> V.Image
+drawTopBorder w = V.string V.defAttr $ "┌" ++ replicate (w - 2) '─' ++ "┐"
 
-          contentPaddingLeft  = max 0 (min (w - 2 - length contentText) ((w - 2 - length contentText) `div` 2 + offsetTextX))
-          contentPaddingRight = w - 2 - length contentText - contentPaddingLeft
-          contentRow          = V.string V.defAttr ("│" ++ replicate contentPaddingLeft ' '
-                                                  ++ contentText ++ replicate contentPaddingRight ' ' ++ "│")
+drawBottomBorder :: Int -> V.Image
+drawBottomBorder w = V.string V.defAttr $ "└" ++ replicate (w - 2) '─' ++ "┘"
 
-          contentHeight = h - 4
-          contentPaddingTop = max 0 (min contentHeight ((contentHeight `div` 2) + offsetTextY))
-          rowsBefore = replicate contentPaddingTop emptyRow
-          rowsAfter = replicate (contentHeight - contentPaddingTop) emptyRow
-      in V.translate x y $ V.vertCat ([topBorder, titleRow, separatorRow] ++ rowsBefore ++ [contentRow] ++ rowsAfter ++ [bottomBorder])
+drawEmptyRow :: Int -> V.Image
+drawEmptyRow w = V.string V.defAttr $ "│" ++ replicate (w - 2) ' ' ++ "│"
+
+drawSeparatorRow :: Int -> V.Image
+drawSeparatorRow w = V.string V.defAttr $ "├" ++ replicate (w - 2) '─' ++ "┤"
+
+drawTitleRow :: Int -> String -> String -> String -> V.Image
+drawTitleRow w titleText modeWindow contentText =
+  let buttons = case modeWindow of
+        "FullScreen" -> "  -  🗗  X "
+        "Minimized"  -> "  ▢  X "
+        _            -> "  -  ▢  X "
+      availableWidth = w - 2
+      maxTitleLength = availableWidth - length buttons
+      trimmedTitle   = take maxTitleLength titleText
+      titlePadding   = max 0 (availableWidth - length trimmedTitle - length buttons) `div` 2
+      titlePaddingR  = w - 2 - titlePadding - length trimmedTitle - length buttons
+      rowStr         = "│" ++ replicate titlePadding ' ' ++ trimmedTitle
+                      ++ replicate titlePaddingR ' ' ++ buttons ++ "│"
+  in V.string V.defAttr rowStr
+
+drawContentRow :: Int -> String -> Int -> V.Image
+drawContentRow w content offsetTextX =
+  let availableWidth     = w - 2
+      contentPaddingLeft = max 0 (min (availableWidth - length content)
+                                 ((availableWidth - length content) `div` 2 + offsetTextX))
+      contentPaddingRight = availableWidth - contentPaddingLeft - length content
+  in V.string V.defAttr $ "│" ++ replicate contentPaddingLeft ' '
+                              ++ content ++ replicate contentPaddingRight ' ' ++ "│"
+
+drawContentArea :: Int -> Int -> String -> Int -> Int -> [V.Image]
+drawContentArea w h content offsetTextX offsetTextY =
+  let contentHeight     = h - 4
+      contentPaddingTop = max 0 (min contentHeight ((contentHeight `div` 2) + offsetTextY))
+      rowsBefore        = replicate contentPaddingTop (drawEmptyRow w)
+      rowsAfter         = replicate (contentHeight - contentPaddingTop) (drawEmptyRow w)
+  in rowsBefore ++ [drawContentRow w content offsetTextX] ++ rowsAfter
 
 absOffset :: Ord a => a -> a -> a -> a
 absOffset maxO minO offset | maxO < offset = maxO
