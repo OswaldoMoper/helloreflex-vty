@@ -21,13 +21,18 @@ data ClickAction = TopEdge | BottomEdge | LeftEdge | RightEdge
 
 data HeaderAction = DragWindow
                   | Minimize
-                  | FullScreen
+                  | Maximize
                   | Close
                   deriving (Eq)
 
 data ContentAction = DragContent
                    | String
                    deriving (Eq, Show)
+
+data WindowMode = Windowed
+                | FullScreen
+                | Minimized
+                deriving (Eq, Show)
 
 data Dimensions = Dimensions
   { dimTop     :: Int
@@ -36,7 +41,7 @@ data Dimensions = Dimensions
   , dimWidth   :: Int
   , offsetX    :: Int
   , offsetY    :: Int
-  , windowMode :: String -- ^ "Windowed", "FullScreen", or "Minimized"
+  , windowMode :: WindowMode
   } deriving (Show, Eq)
 
 type ClickInfo = (ClickAction, Int, Int, Int, Int)
@@ -57,7 +62,7 @@ main = mainWidget $ initManager_ $ do
 dragNRezize :: (HasDisplayRegion t m, HasImageWriter t m, HasTheme t m, PerformEvent t m, MonadHold t m, TriggerEvent t m, MonadFix m, MonadSample t (Performable m))
             => Event t V.Event -> m (Event t ())
 dragNRezize inp = do
-  let initialDims    = Dimensions 5 5 10 21 0 0 "Windowed"
+  let initialDims    = Dimensions 5 5 10 21 0 0 Windowed
       lText          = "¡Hello, Reflex-VTY!"
       minWidth       = length lText + 2
       minHeight      = 3
@@ -109,7 +114,7 @@ handleWindowEvent inp lText minWidth minHeight initialDims = mdo
     fmapMaybe
       (\d ->
         let mode = windowMode d
-        in if mode /= "FullScreen" && mode /= "Minimized"
+        in if mode /= FullScreen && mode /= Minimized
            then Just d
            else Nothing)
       (updated dimensionsDyn)
@@ -117,11 +122,14 @@ handleWindowEvent inp lText minWidth minHeight initialDims = mdo
         (detectClickRegion (length lText))
         dimensionsDyn
         mouseDownEvent
+      screenDimsDyn     = zipDyn screenHeightDyn screenWidthDyn
+      resizingInputsDyn = zipDyn resizingDyn screenDimsDyn
+      windowDimsDyn     = zipDyn dimensionsDyn prevDimsDyn
+      fullContextDyn    = zipDyn resizingInputsDyn windowDimsDyn
       updateResult = attachWithMaybe
         (\((resM, (sh, sw)), (d, prevD)) mouse ->
           updateDimensions d prevD (sh - 1) sw resM mouse minHeight minWidth)
-        (current $ zipDyn (zipDyn resizingDyn (zipDyn screenHeightDyn screenWidthDyn))
-                          (zipDyn dimensionsDyn prevDimsDyn))
+        (current fullContextDyn)
         resizing
       dimensionsUpdate = fst <$> updateResult
       nextClickInfo    = fmap snd updateResult
@@ -137,6 +145,13 @@ handleWindowEvent inp lText minWidth minHeight initialDims = mdo
       dragging = fmap isJust resizingDyn
       resizing = gate (current dragging) mouseDownEvent
   return (dimensionsDyn, quitClickEvent)
+
+detectHeaderButton :: Int -> Int -> ClickAction
+detectHeaderButton x w
+  | x == w - 3 = Header Close
+  | x == w - 6 = Header Maximize
+  | x == w - 9 = Header Minimize
+  | otherwise  = Header DragWindow
 
 detectClickRegion :: Int -> Dimensions -> (Int, Int)
                   -> Maybe ClickInfo
@@ -162,13 +177,7 @@ detectClickRegion textLength d (x, y) =
      else if y == textRowY && x >= textColX && x < textColXEnd
      then Just (Content, x, y, w, h)
      else if y > top && y < top + 2
-     then if x == left + w - 3
-           then Just (Header Close, x, y, w, h)
-           else if x == left + w - 6
-           then Just (Header FullScreen, x, y, w, h)
-           else if x == left + w - 9
-           then Just (Header Minimize, x, y, w, h)
-           else Just (Header DragWindow, x, y, w, h)
+     then Just (detectHeaderButton x (left + w), x, y, w, h)
      else if y == top && x >= left && x <= left + w
      then Just (TopEdge, x, y, w, h)
      else if y == top + h && x >= left && x <= left + w
@@ -190,6 +199,27 @@ applyBounds screenW screenH minW minH d =
       t = clamp 0 (screenH - h) (dimTop d)
   in d { dimLeft = l, dimTop = t, dimWidth = w, dimHeight = h }
 
+handleModeChange :: Dimensions
+                 -> Dimensions
+                 -> Maybe ClickInfo
+                 -> Dimensions -> Dimensions
+                 -> (Dimensions -> Dimensions)
+                 -> Maybe (Dimensions -> Dimensions, Maybe ClickInfo)
+handleModeChange d prev resM min full applyB =
+  case windowMode d of
+    FullScreen -> case resM of
+      Just (Header Maximize, _, _, _, _)     -> Just (const prev, Nothing)
+      Just (Header Minimize, _, _, _, _)     -> Just (const min, Nothing)
+      Just (Header DragWindow, x0, y0, _, _) ->
+        Just (applyB . const prev { dimLeft    = x0
+                                  , dimTop     = y0
+                                  , windowMode = Windowed}, resM)
+      _                                    -> Nothing
+    Minimized -> case resM of
+      Just (Header Maximize, _, _, _, _) -> Just (const full, Nothing)
+      Just _                             -> Just (const prev, Nothing)
+      _                                  -> Nothing
+
 updateDimensions :: Dimensions -- ^ Current dimensions
                  -> Dimensions -- ^ prevFullScreen Dimensions
                  -> Int -> Int -- ^ Screen height and width
@@ -205,7 +235,7 @@ updateDimensions d prevFullScreen screenHeight screenWidth resM (x, y) minHeight
         , dimWidth  = minWidth
         , offsetX   = 0
         , offsetY   = 0
-        , windowMode = "Minimized"
+        , windowMode = Minimized
         }
       fullDims = Dimensions
         { dimTop    = 0
@@ -214,31 +244,14 @@ updateDimensions d prevFullScreen screenHeight screenWidth resM (x, y) minHeight
         , dimWidth  = screenWidth
         , offsetX   = 0
         , offsetY   = 0
-        , windowMode = "FullScreen"
+        , windowMode = FullScreen
         }
       applyB   = applyBounds screenWidth screenHeight minWidth minHeight
   in
     if windowMode prevFullScreen /= windowMode d
-    then case windowMode d of
-      "FullScreen" -> case resM of
-        Just (Header FullScreen, _, _, _, _) ->
-          Just (const prevFullScreen, Nothing)
-        Just (Header Minimize, _, _, _, _) ->
-          Just (const minDims, Nothing)
-        Just (Header DragWindow, x0, y0, w, h) ->
-          Just (applyB . const prevFullScreen { dimLeft = x0
-                                              , dimTop = y0
-                                              , windowMode = "Windowed" }
-               , resM)
-        _ -> Nothing
-      "Minimized" -> case resM of
-        Just (Header FullScreen, _, _, _, _) ->
-          Just (const fullDims, Nothing)
-        Just _ ->
-          Just (const prevFullScreen, Nothing)
-        _ -> Nothing
+    then handleModeChange d prevFullScreen resM minDims fullDims applyB
     else case resM of
-      Just (Header FullScreen, _, _, _, _) ->
+      Just (Header Maximize, _, _, _, _) ->
         Just (const fullDims, Nothing)
       Just (Header Minimize, _, _, _, _) ->
         Just (const minDims, Nothing)
@@ -306,9 +319,9 @@ updateDimensions d prevFullScreen screenHeight screenWidth resM (x, y) minHeight
           _ -> const d
       Nothing -> Nothing
 
-drawRect :: Int -> Int -> Int -> Int -> Int -> Int -> String -> String -> String -> V.Image
+drawRect :: Int -> Int -> Int -> Int -> Int -> Int -> String -> String -> WindowMode -> V.Image
 drawRect x y w h offsetTextX offsetTextY titleText contentText modeWindow
-  | modeWindow == "Minimized" = V.translate x y $ V.vertCat
+  | modeWindow == Minimized = V.translate x y $ V.vertCat
       [ drawTopBorder w
       , drawTitleRow w titleText modeWindow ""
       ]
@@ -332,12 +345,14 @@ drawEmptyRow w = V.string V.defAttr $ "│" ++ replicate (w - 2) ' ' ++ "│"
 drawSeparatorRow :: Int -> V.Image
 drawSeparatorRow w = V.string V.defAttr $ "├" ++ replicate (w - 2) '─' ++ "┤"
 
-drawTitleRow :: Int -> String -> String -> String -> V.Image
+headerButtons :: WindowMode -> String
+headerButtons FullScreen = "  -  🗗  X "
+headerButtons Minimized  = "  ▢  X "
+headerButtons Windowed   = "  -  ▢  X "
+
+drawTitleRow :: Int -> String -> WindowMode -> String -> V.Image
 drawTitleRow w titleText modeWindow contentText =
-  let buttons = case modeWindow of
-        "FullScreen" -> "  -  🗗  X "
-        "Minimized"  -> "  ▢  X "
-        _            -> "  -  ▢  X "
+  let buttons = headerButtons modeWindow
       availableWidth = w - 2
       maxTitleLength = availableWidth - length buttons
       trimmedTitle   = take maxTitleLength titleText
