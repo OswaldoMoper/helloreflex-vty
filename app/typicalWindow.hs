@@ -39,6 +39,8 @@ data Dimensions = Dimensions
   , windowMode :: String -- ^ "Windowed", "FullScreen", or "Minimized"
   } deriving (Show, Eq)
 
+type ClickInfo = (ClickAction, Int, Int, Int, Int)
+
 main :: IO ()
 main = mainWidget $ initManager_ $ do
   inp <- input
@@ -115,9 +117,18 @@ handleWindowEvent inp lText minWidth minHeight initialDims = mdo
         (detectClickRegion (length lText))
         dimensionsDyn
         mouseDownEvent
+      updateResult = attachWithMaybe
+        (\((resM, (sh, sw)), (d, prevD)) mouse ->
+          updateDimensions d prevD (sh - 1) sw resM mouse minHeight minWidth)
+        (current $ zipDyn (zipDyn resizingDyn (zipDyn screenHeightDyn screenWidthDyn))
+                          (zipDyn dimensionsDyn prevDimsDyn))
+        resizing
+      dimensionsUpdate = fst <$> updateResult
+      nextClickInfo    = fmap snd updateResult
   resizingDyn <- holdDyn Nothing $
     leftmost
       [ Just <$> edgeClick
+      , nextClickInfo
       , Nothing <$ mouseUpEvent
       ]
   let quitClickEvent = fmapMaybe (\case
@@ -125,16 +136,16 @@ handleWindowEvent inp lText minWidth minHeight initialDims = mdo
         _                          -> Nothing) edgeClick
       dragging = fmap isJust resizingDyn
       resizing = gate (current dragging) mouseDownEvent
-      dimensionsUpdate = attachWithMaybe
-        (\((resM, (screenHeight, screenWidth)), (d, prevD)) mouse ->
-          updateDimensions d prevD (screenHeight - 1) screenWidth resM mouse minHeight minWidth)
-        (current $ zipDyn (zipDyn resizingDyn (zipDyn screenHeightDyn screenWidthDyn))
-                          (zipDyn dimensionsDyn prevDimsDyn))
-        resizing
+      -- dimensionsUpdate = attachWithMaybe
+      --   (\((resM, (screenHeight, screenWidth)), (d, prevD)) mouse ->
+      --     updateDimensions d prevD (screenHeight - 1) screenWidth resM mouse minHeight minWidth)
+      --   (current $ zipDyn (zipDyn resizingDyn (zipDyn screenHeightDyn screenWidthDyn))
+      --                     (zipDyn dimensionsDyn prevDimsDyn))
+      --   resizing
   return (dimensionsDyn, quitClickEvent)
 
 detectClickRegion :: Int -> Dimensions -> (Int, Int)
-                  -> Maybe (ClickAction, Int, Int, Int, Int)
+                  -> Maybe ClickInfo
 detectClickRegion textLength d (x, y) =
   let top         = dimTop    d
       h           = dimHeight d
@@ -188,10 +199,10 @@ applyBounds screenW screenH minW minH d =
 updateDimensions :: Dimensions -- ^ Current dimensions
                  -> Dimensions -- ^ prevFullScreen Dimensions
                  -> Int -> Int -- ^ Screen height and width
-                 -> Maybe (ClickAction, Int, Int, Int, Int)
+                 -> Maybe ClickInfo
                  -> (Int, Int) -- ^ Mouse position (x, y)
                  -> Int -> Int -- ^ Minimum height and width
-                 -> Maybe (Dimensions -> Dimensions)
+                 -> Maybe (Dimensions -> Dimensions, Maybe ClickInfo)
 updateDimensions d prevFullScreen screenHeight screenWidth resM (x, y) minHeight minWidth =
   let minDims  = Dimensions
         { dimTop    = screenHeight - 2
@@ -217,92 +228,88 @@ updateDimensions d prevFullScreen screenHeight screenWidth resM (x, y) minHeight
     then case windowMode d of
       "FullScreen" -> case resM of
         Just (Header FullScreen, _, _, _, _) ->
-          Just $ const prevFullScreen
+          Just (const prevFullScreen, Nothing)
         Just (Header Minimize, _, _, _, _) ->
-          Just $ const minDims
+          Just (const minDims, Nothing)
         Just (Header DragWindow, x0, y0, w, h) ->
-          Just $ applyB . \dim -> dim
-            { dimLeft  = x0
-            , dimTop   = y0
-            , dimWidth = dimWidth prevFullScreen
-            , dimHeight = dimHeight prevFullScreen
-            , offsetX  = offsetX prevFullScreen
-            , offsetY  = offsetY prevFullScreen
-            , windowMode = "Windowed"
-            }
+          Just (applyB . const prevFullScreen { dimLeft = x0
+                                              , dimTop = y0
+                                              , windowMode = "Windowed" }
+               , resM)
         _ -> Nothing
       "Minimized" -> case resM of
         Just (Header FullScreen, _, _, _, _) ->
-          Just $ const fullDims
+          Just (const fullDims, Nothing)
         Just _ ->
-          Just $ const prevFullScreen
+          Just (const prevFullScreen, Nothing)
         _ -> Nothing
     else case resM of
       Just (Header FullScreen, _, _, _, _) ->
-        Just $ const fullDims
+        Just (const fullDims, Nothing)
       Just (Header Minimize, _, _, _, _) ->
-        Just $ const minDims
-      Just (action, x0, y0, w, h) ->
-        let deltaX  = x0 - x
-            deltaY  = y0 - y
-            deltaX' = x  - x0
-            deltaY' = y  - y0
-        in case action of
+        Just (const minDims, Nothing)
+      Just (action, x0, y0, w, h) -> Just (fDim, actionM) where
+        deltaX  = x0 - x
+        deltaY  = y0 - y
+        deltaX' = x  - x0
+        deltaY' = y  - y0
+        actionM = resM
+        fDim = case action of
           TopLeft | deltaX' /= 0 || deltaY' /= 0 ->
-            Just $ applyB . \d -> d
+            applyB . \d -> d
               { dimLeft  = dimLeft d + deltaX'
               , dimTop   = dimTop d + deltaY'
               , dimWidth = max minWidth (dimWidth d - deltaX')
               , dimHeight = max minHeight (dimHeight d - deltaY')
               }
           TopRight | deltaX' /= 0 || deltaY' /= 0 ->
-            Just $ applyB . \d -> d
+            applyB . \d -> d
               { dimTop    = dimTop d - deltaY
               , dimWidth  = max minWidth (dimWidth d - deltaX)
               , dimHeight = max minHeight (dimHeight d - deltaY')
               }
           BottomLeft | deltaX' /= 0 || deltaY' /= 0 ->
-            Just $ applyB . \d -> d
+            applyB . \d -> d
               { dimLeft   = dimLeft d + deltaX'
               , dimWidth  = max minWidth (dimWidth d - deltaX')
               , dimHeight = max minHeight (dimHeight d - deltaY)
               }
           BottomRight | deltaX' /= 0 || deltaY' /= 0 ->
-            Just $ applyB . \d -> d
+            applyB . \d -> d
               { dimWidth  = max minWidth (dimWidth d - deltaX)
               , dimHeight = max minHeight (dimHeight d - deltaY)
               }
           TopEdge | deltaY' /= 0 ->
-            Just $ applyB . \d -> d
+            applyB . \d -> d
             { dimTop    = dimTop d + deltaY'
             , dimHeight = max minHeight (dimHeight d - deltaY')
             }
           BottomEdge | deltaY /= 0 ->
-            Just $ applyB . \d -> d
+            applyB . \d -> d
               { dimHeight = max minHeight (dimHeight d - deltaY)
               }
           LeftEdge | deltaX' /= 0 ->
-            Just $ applyB . \d -> d
+            applyB . \d -> d
               { dimLeft  = dimLeft d + deltaX'
               , dimWidth = max minWidth (dimWidth d - deltaX')
               }
           RightEdge | deltaX /= 0 ->
-            Just $ applyB . \d -> d
+            applyB . \d -> d
               { dimWidth = max minWidth (dimWidth d - deltaX)
               }
           Header DragWindow | deltaX' /= 0 || deltaY' /= 0 ->
-            Just $ \d -> d
+            \d -> d
               { dimLeft = dimLeft d + deltaX'
               , dimTop  = dimTop d + deltaY'
               }
           Content | deltaX' /= 0 || deltaY' /= 0 ->
             let clampX = absOffset ((w `div` 2) - 2) (2 - (w `div` 2))
                 clampY = absOffset ((h `div` 2) - 2) (2 - (h `div` 2))
-            in Just $ \d -> d
+            in \d -> d
                 { offsetX = clampX (offsetX d + deltaX')
                 , offsetY = clampY (offsetY d + deltaY')
                 }
-          _ -> Nothing
+          _ -> const d
       Nothing -> Nothing
 
 drawRect :: Int -> Int -> Int -> Int -> Int -> Int -> String -> String -> String -> V.Image
