@@ -136,12 +136,6 @@ handleWindowEvent inp lText minWidth minHeight initialDims = mdo
         _                          -> Nothing) edgeClick
       dragging = fmap isJust resizingDyn
       resizing = gate (current dragging) mouseDownEvent
-      -- dimensionsUpdate = attachWithMaybe
-      --   (\((resM, (screenHeight, screenWidth)), (d, prevD)) mouse ->
-      --     updateDimensions d prevD (screenHeight - 1) screenWidth resM mouse minHeight minWidth)
-      --   (current $ zipDyn (zipDyn resizingDyn (zipDyn screenHeightDyn screenWidthDyn))
-      --                     (zipDyn dimensionsDyn prevDimsDyn))
-      --   resizing
   return (dimensionsDyn, quitClickEvent)
 
 detectClickRegion :: Int -> Dimensions -> (Int, Int)
