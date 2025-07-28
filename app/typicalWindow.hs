@@ -12,39 +12,9 @@ import qualified Graphics.Vty      as V
 import           Reflex
 import           Reflex.Vty
 import           Reflex.Vty.Widget ()
-
-data ClickAction = TopEdge | BottomEdge | LeftEdge | RightEdge
-                 | TopLeft | TopRight | BottomLeft | BottomRight
-                 | Content
-                 | Header HeaderAction
-                 deriving (Eq)
-
-data HeaderAction = DragWindow
-                  | Minimize
-                  | Maximize
-                  | Close
-                  deriving (Eq)
-
-data ContentAction = DragContent
-                   | String
-                   deriving (Eq, Show)
-
-data WindowMode = Windowed
-                | FullScreen
-                | Minimized
-                deriving (Eq, Show)
-
-data Dimensions = Dimensions
-  { dimTop     :: Int
-  , dimHeight  :: Int
-  , dimLeft    :: Int
-  , dimWidth   :: Int
-  , offsetX    :: Int
-  , offsetY    :: Int
-  , windowMode :: WindowMode
-  } deriving (Show, Eq)
-
-type ClickInfo = (ClickAction, Int, Int, Int, Int)
+import           Model
+import           Handler
+import           Template
 
 main :: IO ()
 main = mainWidget $ initManager_ $ do
