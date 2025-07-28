@@ -2,7 +2,7 @@
 
 module Model where
 
-import GHC.Generics (Generic)
+import           GHC.Generics (Generic)
 
 data Dimensions = Dimensions
   { dimTop     :: Int

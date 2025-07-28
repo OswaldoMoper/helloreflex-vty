@@ -1,8 +1,8 @@
 
 module Template where
 
-import qualified Graphics.Vty      as V
-import Model
+import qualified Graphics.Vty as V
+import           Model
 
 drawRect :: Int -> Int -> Int -> Int -> Int -> Int -> String -> String -> WindowMode -> V.Image
 drawRect x y w h offsetTextX offsetTextY titleText contentText modeWindow
