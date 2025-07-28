@@ -48,26 +48,26 @@ updateDimensions d prevFullScreen screenHeight screenWidth resM (x, y) minHeight
                       { dimLeft   = dimLeft d' - dX, dimTop = dimTop d' - dY
                       , dimWidth  = max minWidth (dimWidth d' + dX)
                       , dimHeight = max minHeight (dimHeight d' + dY) }
-                    TopRight | dNotZero          -> \d' -> d'
+                    TopRight | dNotZero             -> \d' -> d'
                       { dimTop    = dimTop d' - dY
                       , dimWidth  = max minWidth (dimWidth d' - dX)
                       , dimHeight = max minHeight (dimHeight d' + dY) }
-                    BottomLeft | dNotZero        -> \d' -> d'
+                    BottomLeft | dNotZero           -> \d' -> d'
                       { dimLeft   = dimLeft d' - dX
                       , dimWidth  = max minWidth (dimWidth d' + dX)
                       , dimHeight = max minHeight (dimHeight d' - dY) }
-                    BottomRight | dNotZero       -> \d' -> d'
+                    BottomRight | dNotZero          -> \d' -> d'
                       { dimWidth  = max minWidth (dimWidth d' - dX)
                       , dimHeight = max minHeight (dimHeight d' - dY) }
-                    TopEdge | dY /= 0            -> \d' -> d'
+                    TopEdge | dY /= 0 || dX == 0    -> \d' -> d'
                       { dimTop    = dimTop d' - dY
                       , dimHeight = max minHeight (dimHeight d' + dY) }
-                    BottomEdge | dY /= 0         -> \d' -> d'
+                    BottomEdge | dY /= 0 || dX == 0 -> \d' -> d'
                       { dimHeight = max minHeight (dimHeight d' - dY) }
-                    LeftEdge | dX /= 0           -> \d' -> d'
+                    LeftEdge | dX /= 0 || dY == 0   -> \d' -> d'
                       { dimLeft  = dimLeft d' - dX
                       , dimWidth = max minWidth (dimWidth d' + dX) }
-                    RightEdge | dX /= 0          -> \d' -> d'
+                    RightEdge | dX /= 0 || dY == 0  -> \d' -> d'
                       { dimWidth = max minWidth (dimWidth d' - dX) }
                     Header DragWindow | dNotZero -> \d' -> d'
                       { dimLeft = dimLeft d' - dX
@@ -107,36 +107,33 @@ detectClickRegion :: Int -> Dimensions -> (Int, Int)
                   -> Maybe ClickInfo
 detectClickRegion textLength d (x, y) =
   let top         = dimTop    d
-      h           = dimHeight d
-      w           = dimWidth  d
+      height      = dimHeight d
+      width       = dimWidth  d
       left        = dimLeft   d
+      right       = left + width
+      bottom      = top + height
       tx          = offsetX   d
       ty          = offsetY   d
-      textRowY    = top + 3 + ((h - 3) `div` 2) + ty
-      textColX    = left + 1 + ((w - 2 - textLength) `div` 2) + tx
+      textRowY    = top + 3 + ((height - 3) `div` 2) + ty
+      textColX    = left + 1 + ((width - 2 - textLength) `div` 2) + tx
       textColXEnd = textColX + textLength
+      inBoundsX   = x >= left && x <= right
+      inBoundsY   = y >= top  && y <= bottom
   in -- traceShow ("mouse: ", x, y, "box: ", left, top, w, h) $
-     if x == left && y == top
-     then Just (TopLeft, x, y, w, h)
-     else if x == left + w && y == top
-     then Just (TopRight, x, y, w, h)
-     else if x == left && y == top + h
-     then Just (BottomLeft, x, y, w, h)
-     else if x == left + w && y == top + h
-     then Just (BottomRight, x, y, w, h)
-     else if y == textRowY && x >= textColX && x < textColXEnd
-     then Just (Content, x, y, w, h)
-     else if y > top && y < top + 2
-     then Just (detectHeaderButton x (left + w), x, y, w, h)
-     else if y == top && x >= left && x <= left + w
-     then Just (TopEdge, x, y, w, h)
-     else if y == top + h && x >= left && x <= left + w
-     then Just (BottomEdge, x, y, w, h)
-     else if x == left && y >= top && y <= top + h
-     then Just (LeftEdge, x, y, w, h)
-     else if x == left + w && y >= top && y <= top + h
-     then Just (RightEdge, x, y, w, h)
-     else Nothing
+     case () of
+       _ | x == left     && y == top     -> Just (TopLeft, x, y, width, height)
+         | x == right    && y == top     -> Just (TopRight, x, y, width, height)
+         | x == left     && y == bottom  -> Just (BottomLeft, x, y, width, height)
+         | x == right    && y == bottom  -> Just (BottomRight, x, y, width, height)
+         | y == textRowY && x >= textColX && x < textColXEnd
+                                   -> Just (Content, x, y, width, height) 
+         | y > top && y < top + 2
+                                   -> Just (detectHeaderButton x right, x, y, width, height) 
+         | y == top     && inBoundsX -> Just (TopEdge, x, y, width, height)
+         | y == bottom  && inBoundsX -> Just (BottomEdge, x, y, width, height)
+         | x == left    && inBoundsY -> Just (LeftEdge, x, y, width, height)
+         | x == right   && inBoundsY -> Just (RightEdge, x, y, width, height) 
+         | otherwise -> Nothing
 
 detectHeaderButton :: Int -> Int -> ClickAction
 detectHeaderButton x w
